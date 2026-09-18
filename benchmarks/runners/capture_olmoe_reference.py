@@ -48,10 +48,13 @@ def _record(identity: str, role: str, tensor: Any, dtype: str) -> dict[str, Any]
         "role": role,
         "dtype": dtype,
         "shape": list(value.shape),
+        # ReferenceOracleComparison streams values linearly while the explicit
+        # shape carries dimensionality.  Flatten here so every emitted record
+        # is directly consumable and cannot hide nested non-numeric arrays.
         "values": (
-            value.tolist()
+            value.reshape(-1).tolist()
             if dtype.startswith("int") or dtype.startswith("uint")
-            else value.float().tolist()
+            else value.float().reshape(-1).tolist()
         ),
     }
 
