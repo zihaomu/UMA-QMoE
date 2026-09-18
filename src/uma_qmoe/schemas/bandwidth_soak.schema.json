@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/bandwidth_soak.schema.json",
+  "title": "UMA-QMoE BandwidthSoak v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "completed_at",
+    "target_id",
+    "status",
+    "measurement_scope",
+    "runtime",
+    "configuration",
+    "memory",
+    "samples",
+    "operations",
+    "telemetry",
+    "gates"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "bandwidth_soak" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "enum": ["diagnostic", "passed", "failed"] },
+    "measurement_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["elapsed_time", "traffic", "counter_calibrated", "limitations"],
+      "properties": {
+        "elapsed_time": { "const": "host_monotonic_with_device_synchronize" },
+        "traffic": { "const": "algorithmic_bytes" },
+        "counter_calibrated": { "const": false },
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "torch", "cuda", "hip", "accelerator_name", "compute_capability"],
+      "properties": {
+        "python": { "type": "string", "minLength": 1 },
+        "torch": { "type": "string", "minLength": 1 },
+        "cuda": { "type": ["string", "null"] },
+        "hip": { "type": ["string", "null"] },
+        "accelerator_name": { "type": "string", "minLength": 1 },
+        "compute_capability": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "prefixItems": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "integer", "minimum": 0 }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested_buffer_bytes",
+        "actual_buffer_bytes",
+        "dtype",
+        "element_count",
+        "requested_duration_seconds",
+        "minimum_full_soak_seconds",
+        "actual_duration_seconds",
+        "warmup_cycles",
+        "inner_iterations",
+        "telemetry_interval_seconds",
+        "maximum_coefficient_of_variation",
+        "maximum_absolute_drift_fraction"
+      ],
+      "properties": {
+        "requested_buffer_bytes": { "type": "integer", "minimum": 4194304 },
+        "actual_buffer_bytes": { "type": "integer", "minimum": 4194304 },
+        "dtype": { "const": "float32" },
+        "element_count": { "type": "integer", "minimum": 1048576 },
+        "requested_duration_seconds": { "type": "integer", "minimum": 10, "maximum": 86400 },
+        "minimum_full_soak_seconds": { "const": 1800 },
+        "actual_duration_seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "warmup_cycles": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "inner_iterations": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "telemetry_interval_seconds": { "type": "number", "minimum": 1, "maximum": 300 },
+        "maximum_coefficient_of_variation": { "const": 0.03 },
+        "maximum_absolute_drift_fraction": { "const": 0.05 }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "free_before_allocation_bytes",
+        "total_bytes",
+        "free_after_allocation_bytes",
+        "free_after_soak_bytes",
+        "peak_allocated_bytes",
+        "peak_reserved_bytes",
+        "swap_in_pages_before",
+        "swap_in_pages_after",
+        "swap_in_pages_delta",
+        "swap_out_pages_before",
+        "swap_out_pages_after",
+        "swap_out_pages_delta"
+      ],
+      "properties": {
+        "free_before_allocation_bytes": { "type": "integer", "minimum": 0 },
+        "total_bytes": { "type": "integer", "minimum": 1 },
+        "free_after_allocation_bytes": { "type": "integer", "minimum": 0 },
+        "free_after_soak_bytes": { "type": "integer", "minimum": 0 },
+        "peak_allocated_bytes": { "type": "integer", "minimum": 0 },
+        "peak_reserved_bytes": { "type": "integer", "minimum": 0 },
+        "swap_in_pages_before": { "type": "integer", "minimum": 0 },
+        "swap_in_pages_after": { "type": "integer", "minimum": 0 },
+        "swap_in_pages_delta": { "type": "integer", "minimum": 0 },
+        "swap_out_pages_before": { "type": "integer", "minimum": 0 },
+        "swap_out_pages_after": { "type": "integer", "minimum": 0 },
+        "swap_out_pages_delta": { "type": "integer", "minimum": 0 },
+        "workload_cgroup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gate_scope",
+            "swap_current_bytes_before",
+            "swap_current_bytes_after",
+            "swap_current_bytes_delta",
+            "swap_max_bytes",
+            "memory_events_before",
+            "memory_events_after",
+            "memory_events_delta"
+          ],
+          "properties": {
+            "gate_scope": { "const": "workload_cgroup_v2" },
+            "swap_current_bytes_before": { "type": "integer", "minimum": 0 },
+            "swap_current_bytes_after": { "type": "integer", "minimum": 0 },
+            "swap_current_bytes_delta": { "type": "integer", "minimum": 0 },
+            "swap_max_bytes": { "type": ["integer", "null"], "minimum": 0 },
+            "memory_events_before": { "$ref": "#/$defs/cgroup_events" },
+            "memory_events_after": { "$ref": "#/$defs/cgroup_events" },
+            "memory_events_delta": { "$ref": "#/$defs/cgroup_events" }
+          }
+        }
+      }
+    },
+    "samples": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sample_index", "monotonic_ns", "elapsed_from_start_seconds", "timings_seconds"],
+        "properties": {
+          "sample_index": { "type": "integer", "minimum": 0, "maximum": 99999 },
+          "monotonic_ns": { "type": "integer", "minimum": 1 },
+          "elapsed_from_start_seconds": { "type": "number", "exclusiveMinimum": 0 },
+          "timings_seconds": { "$ref": "#/$defs/timings" }
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "algorithmic_read_bytes",
+          "algorithmic_write_bytes",
+          "algorithmic_total_bytes",
+          "sample_count",
+          "minimum_gbps",
+          "p01_gbps",
+          "p50_gbps",
+          "p95_gbps",
+          "p99_gbps",
+          "maximum_gbps",
+          "mean_gbps",
+          "coefficient_of_variation",
+          "drift_window_samples",
+          "first_window_p50_gbps",
+          "last_window_p50_gbps",
+          "drift_fraction"
+        ],
+        "properties": {
+          "id": { "enum": ["read_reduce", "write_fill", "copy"] },
+          "algorithmic_read_bytes": { "type": "integer", "minimum": 0 },
+          "algorithmic_write_bytes": { "type": "integer", "minimum": 0 },
+          "algorithmic_total_bytes": { "type": "integer", "minimum": 1 },
+          "sample_count": { "type": "integer", "minimum": 3, "maximum": 100000 },
+          "minimum_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "p01_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "p50_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "p95_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "p99_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "maximum_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "mean_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "coefficient_of_variation": { "type": "number", "minimum": 0 },
+          "drift_window_samples": { "type": "integer", "minimum": 3, "maximum": 10000 },
+          "first_window_p50_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "last_window_p50_gbps": { "type": "number", "exclusiveMinimum": 0 },
+          "drift_fraction": { "type": "number" }
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "provider", "collection_mode", "samples", "summary"],
+      "properties": {
+        "status": { "const": "available" },
+        "provider": { "enum": ["nvidia_smi", "amd_smi"] },
+        "collection_mode": { "const": "periodic_after_cycle_outside_timed_regions" },
+        "samples": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 86400,
+          "items": { "$ref": "#/$defs/telemetry_sample" }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["temperature_c", "socket_power_w", "graphics_clock_mhz", "memory_clock_mhz", "utilization_percent"],
+          "properties": {
+            "temperature_c": { "$ref": "#/$defs/telemetry_summary" },
+            "socket_power_w": { "$ref": "#/$defs/telemetry_summary" },
+            "graphics_clock_mhz": { "$ref": "#/$defs/telemetry_summary" },
+            "memory_clock_mhz": { "$ref": "#/$defs/telemetry_summary" },
+            "utilization_percent": { "$ref": "#/$defs/telemetry_summary" }
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_duration_passed", "no_swap_activity_passed", "coefficient_of_variation_passed", "drift_passed", "overall_passed"],
+      "properties": {
+        "minimum_duration_passed": { "type": "boolean" },
+        "workload_cgroup_swap_disabled_passed": { "type": "boolean" },
+        "no_swap_activity_passed": { "type": "boolean" },
+        "no_oom_events_passed": { "type": "boolean" },
+        "coefficient_of_variation_passed": { "type": "boolean" },
+        "drift_passed": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "cgroup_events": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["high", "max", "oom", "oom_kill", "oom_group_kill"],
+      "properties": {
+        "high": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 0 },
+        "oom": { "type": "integer", "minimum": 0 },
+        "oom_kill": { "type": "integer", "minimum": 0 },
+        "oom_group_kill": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "timings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read_reduce", "write_fill", "copy"],
+      "properties": {
+        "read_reduce": { "type": "number", "exclusiveMinimum": 0 },
+        "write_fill": { "type": "number", "exclusiveMinimum": 0 },
+        "copy": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "telemetry_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation_id", "sample_index", "boundary", "monotonic_ns", "temperature_c", "socket_power_w", "graphics_clock_mhz", "memory_clock_mhz", "utilization_percent"],
+      "properties": {
+        "operation_id": { "const": "soak_cycle" },
+        "sample_index": { "type": "integer", "minimum": 0, "maximum": 99999 },
+        "boundary": { "const": "after" },
+        "monotonic_ns": { "type": "integer", "minimum": 1 },
+        "temperature_c": { "type": ["number", "null"], "minimum": -100 },
+        "socket_power_w": { "type": ["number", "null"], "minimum": 0 },
+        "graphics_clock_mhz": { "type": ["number", "null"], "minimum": 0 },
+        "memory_clock_mhz": { "type": ["number", "null"], "minimum": 0 },
+        "utilization_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 }
+      }
+    },
+    "telemetry_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available_samples", "minimum", "p50", "p95", "maximum"],
+      "properties": {
+        "available_samples": { "type": "integer", "minimum": 0, "maximum": 86400 },
+        "minimum": { "type": ["number", "null"] },
+        "p50": { "type": ["number", "null"] },
+        "p95": { "type": ["number", "null"] },
+        "maximum": { "type": ["number", "null"] }
+      }
+    }
+  }
+}

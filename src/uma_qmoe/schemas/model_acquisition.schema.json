@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/model_acquisition.schema.json",
+  "title": "UMA-QMoE ModelAcquisition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "completed_at",
+    "model_manifest_sha256",
+    "model_directory",
+    "file_count",
+    "total_bytes",
+    "files"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "model_acquisition" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "model_manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "model_directory": { "type": "string", "minLength": 1 },
+    "file_count": { "type": "integer", "minimum": 1 },
+    "total_bytes": { "type": "integer", "minimum": 1 },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "size_bytes", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/memory_snapshot.schema.json",
+  "title": "UMA-QMoE MemorySnapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "captured_at",
+    "target_id",
+    "memory",
+    "page_faults",
+    "cgroup_v2",
+    "process"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "memory_snapshot" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "mem_total_bytes",
+        "mem_available_bytes",
+        "swap_total_bytes",
+        "swap_free_bytes",
+        "committed_as_bytes"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/availability" },
+        "mem_total_bytes": { "$ref": "#/$defs/nullableBytes" },
+        "mem_available_bytes": { "$ref": "#/$defs/nullableBytes" },
+        "swap_total_bytes": { "$ref": "#/$defs/nullableBytes" },
+        "swap_free_bytes": { "$ref": "#/$defs/nullableBytes" },
+        "committed_as_bytes": { "$ref": "#/$defs/nullableBytes" }
+      }
+    },
+    "page_faults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "major_total"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable"] },
+        "major_total": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "cgroup_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "memory_max_bytes",
+        "memory_max_is_unlimited",
+        "memory_current_bytes"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/availability" },
+        "memory_max_bytes": { "$ref": "#/$defs/nullableBytes" },
+        "memory_max_is_unlimited": { "type": ["boolean", "null"] },
+        "memory_current_bytes": { "$ref": "#/$defs/nullableBytes" }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rss_bytes"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable"] },
+        "rss_bytes": { "$ref": "#/$defs/nullableBytes" }
+      }
+    }
+  },
+  "$defs": {
+    "availability": { "enum": ["available", "partial", "unavailable"] },
+    "nullableBytes": { "type": ["integer", "null"], "minimum": 0 }
+  }
+}

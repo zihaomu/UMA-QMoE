@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/artifact_verification.schema.json",
+  "title": "UMA-QMoE ArtifactVerification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "verified_at",
+    "target_id",
+    "source_contract_kind",
+    "source_contract_path",
+    "source_contract_sha256",
+    "artifact_directory",
+    "file_count",
+    "total_bytes",
+    "files"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "artifact_verification" },
+    "verified_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "source_contract_kind": { "const": "model_derivation" },
+    "source_contract_path": { "type": "string", "minLength": 1 },
+    "source_contract_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact_directory": { "type": "string", "minLength": 1 },
+    "file_count": { "type": "integer", "minimum": 1 },
+    "total_bytes": { "type": "integer", "minimum": 1 },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fileIdentity" }
+    }
+  },
+  "$defs": {
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

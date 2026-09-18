@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/model_manifest.schema.json",
+  "title": "UMA-QMoE ModelManifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "model_id",
+    "model_revision",
+    "variant",
+    "config",
+    "architecture",
+    "tokenizer",
+    "dtypes",
+    "weights",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "model_manifest" },
+    "status": { "enum": ["draft", "frozen"] },
+    "model_id": { "type": "string", "minLength": 1 },
+    "model_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Immutable source commit; floating names such as main are forbidden."
+    },
+    "variant": { "enum": ["base", "sft", "instruct"] },
+    "license": { "type": "string", "minLength": 1 },
+    "config": { "$ref": "#/$defs/fileIdentity" },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class_name",
+        "model_type",
+        "num_layers",
+        "hidden_size",
+        "expert_intermediate_size",
+        "num_experts",
+        "top_k",
+        "max_position_embeddings",
+        "normalize_top_k_probability"
+      ],
+      "properties": {
+        "class_name": { "type": "string", "minLength": 1 },
+        "model_type": { "type": "string", "minLength": 1 },
+        "num_layers": { "type": "integer", "minimum": 1 },
+        "hidden_size": { "type": "integer", "minimum": 1 },
+        "expert_intermediate_size": { "type": "integer", "minimum": 1 },
+        "num_experts": { "type": "integer", "minimum": 2 },
+        "top_k": { "type": "integer", "minimum": 1 },
+        "max_position_embeddings": { "type": "integer", "minimum": 1 },
+        "normalize_top_k_probability": { "type": "boolean" },
+        "declared_total_parameters": { "type": "string", "minLength": 1 },
+        "declared_active_parameters": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tokenizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "revision"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "chat_template": { "type": ["string", "null"] },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/fileIdentity" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "dtypes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "config_declared",
+        "uploaded_weights",
+        "uploaded_weights_evidence",
+        "api_reported_parameter_counts",
+        "oracle_compute",
+        "local_tensor_scan"
+      ],
+      "properties": {
+        "config_declared": { "type": "string", "minLength": 1 },
+        "uploaded_weights": { "type": "string", "minLength": 1 },
+        "uploaded_weights_evidence": { "type": "string", "minLength": 1 },
+        "api_reported_parameter_counts": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "model_card_uploaded_weights_claim": { "type": "string", "minLength": 1 },
+        "evidence_conflict": { "type": "boolean" },
+        "oracle_compute": { "type": "string", "minLength": 1 },
+        "local_tensor_scan": { "enum": ["pending_download", "verified"] },
+        "observed_tensor_dtypes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "hash_source", "local_verification", "artifacts"],
+      "properties": {
+        "format": { "const": "safetensors" },
+        "hash_source": { "enum": ["huggingface_lfs_metadata", "local_sha256"] },
+        "local_verification": { "enum": ["pending_download", "verified"] },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/fileIdentity" }
+        },
+        "tensor_hashes_status": { "enum": ["pending_local_scan", "verified"] },
+        "tensor_inventory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "source_manifest_sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "source_manifest_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "repository", "resolved_at", "metadata_endpoint"],
+      "properties": {
+        "provider": { "const": "huggingface" },
+        "repository": { "type": "string", "minLength": 1 },
+        "resolved_at": { "type": "string", "format": "date-time" },
+        "metadata_endpoint": { "type": "string", "format": "uri" }
+      }
+    }
+  },
+  "$defs": {
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

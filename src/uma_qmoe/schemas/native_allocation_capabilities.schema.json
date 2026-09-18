@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/native_allocation_capabilities.schema.json",
+  "title": "UMA-QMoE NativeAllocationCapabilities v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "target_id",
+    "status",
+    "source",
+    "build",
+    "runtime",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "native_allocation_capabilities" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "const": "passed" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "compiler", "compiler_version", "architecture", "optimization"],
+      "properties": {
+        "backend": { "enum": ["cuda", "hip"] },
+        "compiler": { "enum": ["nvcc", "hipcc"] },
+        "compiler_version": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "architecture": { "type": "string", "pattern": "^[A-Za-z0-9_.+-]+$" },
+        "optimization": { "const": "O3" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_name", "total_global_memory_bytes", "attributes"],
+      "properties": {
+        "device_name": { "type": "string", "minLength": 1 },
+        "total_global_memory_bytes": { "type": "integer", "minimum": 1 },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "managed_memory",
+            "concurrent_managed_access",
+            "pageable_memory_access",
+            "pageable_memory_access_uses_host_page_tables",
+            "direct_managed_memory_access_from_host",
+            "host_native_atomic_supported",
+            "memory_pools_supported"
+          ],
+          "properties": {
+            "managed_memory": { "type": "integer", "enum": [0, 1] },
+            "concurrent_managed_access": { "type": "integer", "enum": [0, 1] },
+            "pageable_memory_access": { "type": "integer", "enum": [0, 1] },
+            "pageable_memory_access_uses_host_page_tables": { "type": "integer", "enum": [0, 1] },
+            "direct_managed_memory_access_from_host": { "type": "integer", "enum": [0, 1] },
+            "host_native_atomic_supported": { "type": "integer", "enum": [0, 1] },
+            "memory_pools_supported": { "type": "integer", "enum": [0, 1] },
+            "virtual_memory_management_supported": { "type": "integer", "enum": [0, 1] }
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "build": { "properties": { "backend": { "const": "hip" } } } } },
+      "then": {
+        "properties": {
+          "runtime": {
+            "properties": {
+              "attributes": { "required": ["virtual_memory_management_supported"] }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

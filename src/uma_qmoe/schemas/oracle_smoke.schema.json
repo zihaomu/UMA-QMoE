@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/oracle_smoke.schema.json",
+  "title": "UMA-QMoE OracleSmoke v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "target_id",
+    "status",
+    "model",
+    "runtime",
+    "input",
+    "timing",
+    "memory",
+    "result"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "oracle_smoke" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "const": "passed" },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "model_revision",
+        "derivation_id",
+        "derivation_path",
+        "derivation_file_sha256",
+        "derivation_semantic_sha256",
+        "artifact_root",
+        "weight_dtype"
+      ],
+      "properties": {
+        "model_id": { "type": "string", "minLength": 1 },
+        "model_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "derivation_id": { "type": "string", "minLength": 1 },
+        "derivation_path": { "type": "string", "minLength": 1 },
+        "derivation_file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "derivation_semantic_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "artifact_root": { "type": "string", "minLength": 1 },
+        "weight_dtype": { "const": "BF16" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python",
+        "torch",
+        "transformers",
+        "cuda",
+        "hip",
+        "accelerator_name",
+        "compute_capability",
+        "bf16_supported",
+        "model_type",
+        "num_experts",
+        "num_experts_per_token"
+      ],
+      "properties": {
+        "python": { "type": "string", "minLength": 1 },
+        "torch": { "type": "string", "minLength": 1 },
+        "transformers": { "type": "string", "minLength": 1 },
+        "cuda": { "type": ["string", "null"] },
+        "hip": { "type": ["string", "null"] },
+        "accelerator_name": { "type": "string", "minLength": 1 },
+        "compute_capability": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "prefixItems": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "integer", "minimum": 0 }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "bf16_supported": { "const": true },
+        "model_type": { "const": "olmoe" },
+        "num_experts": { "const": 64 },
+        "num_experts_per_token": { "const": 8 }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fixture_path",
+        "fixture_file_sha256",
+        "prompt_id",
+        "prompt_sha256",
+        "token_ids"
+      ],
+      "properties": {
+        "fixture_path": { "type": "string", "minLength": 1 },
+        "fixture_file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "prompt_id": { "type": "string", "minLength": 1 },
+        "prompt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "token_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4096,
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["load_seconds", "forward_seconds"],
+      "properties": {
+        "load_seconds": { "type": "number", "minimum": 0 },
+        "forward_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "free_before_load_bytes",
+        "total_bytes",
+        "peak_allocated_bytes",
+        "peak_reserved_bytes"
+      ],
+      "properties": {
+        "free_before_load_bytes": { "type": "integer", "minimum": 0 },
+        "total_bytes": { "type": "integer", "minimum": 1 },
+        "peak_allocated_bytes": { "type": "integer", "minimum": 0 },
+        "peak_reserved_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finite",
+        "logits_shape",
+        "final_token_logits_sha256",
+        "top_token_ids",
+        "top_logits"
+      ],
+      "properties": {
+        "finite": { "const": true },
+        "logits_shape": {
+          "type": "array",
+          "prefixItems": [
+            { "const": 1 },
+            { "type": "integer", "minimum": 1 }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "final_token_logits_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "top_token_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "top_logits": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": { "type": "number" }
+        }
+      }
+    }
+  }
+}

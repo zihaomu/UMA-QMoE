@@ -1,0 +1,62 @@
+schema_version: 1
+kind: model_derivation
+generated_at: '2026-09-17T12:10:13Z'
+derivation_id: olmoe-1b-7b-0125-bf16-rne-v1
+status: verified
+source:
+  model_id: allenai/OLMoE-1B-7B-0125
+  model_revision: 9b0c1aa87e34a20052389dce1f0cf01da783f654
+  model_manifest_path: models/manifests/olmoe_1b_7b_0125.yaml
+  model_manifest_sha256: f2cb20db5dfdd923d2285213d561f0b9f5557af49a58587c6433c9dd5f6fed84
+  tensor_inventory_path: models/inventories/olmoe_1b_7b_0125_f32.json
+  tensor_inventory_sha256: 70575bcf1bc9480486f7fd02a4f06488e01478c4e31a6b37ab4f04cf6eea8c03
+transform:
+  id: f32_to_bf16_rne_v1
+  source_dtype: F32
+  target_dtype: BF16
+  rounding: round_to_nearest_even
+  nan_policy: preserve_nan
+  implementation: uma_qmoe.bf16
+  chunk_bytes: 67108864
+artifact_root: models/derived/OLMoE-1B-7B-0125/9b0c1aa87e34a20052389dce1f0cf01da783f654/bf16-rne-v1
+config:
+  path: config.json
+  size_bytes: 814
+  sha256: df216d37ba46e17fe01169a13c193537578ed5281aaf0a5887406a7cd4b09486
+tokenizer_files:
+- path: tokenizer.json
+  size_bytes: 3565678
+  sha256: ff3f2a2fc3b88f6f8504650e2ebb8e018bc4206a90eb41f1a9ff351e02e44ff9
+- path: tokenizer_config.json
+  size_bytes: 5402
+  sha256: 4054b570753cfb3a9fa6fe6f8fbcc0dd4e70d9b5976396ec9a28ebeeb682bf91
+- path: special_tokens_map.json
+  size_bytes: 293
+  sha256: a6188c1e366f8ed715e60ff39c46a8c500fc33508e2affeb23e8c547c5853193
+weights:
+  format: safetensors
+  observed_dtypes:
+  - BF16
+  artifacts:
+  - path: model-00001-of-00006.safetensors
+    size_bytes: 2497029992
+    sha256: 68f27851a528f761fa0cf6c3084b517419ffd730e64601ace5f12df5fff1f041
+  - path: model-00002-of-00006.safetensors
+    size_bytes: 2496519952
+    sha256: 1fc12f5da7e8547359bf3bbbfa21f4876e34d63a4575be1bd9d6853190c9064c
+  - path: model-00003-of-00006.safetensors
+    size_bytes: 2496519952
+    sha256: 70d541484896984431fa42484bdc6ef631710ba89af47467d657653e01e486e5
+  - path: model-00004-of-00006.safetensors
+    size_bytes: 2496520288
+    sha256: a2976c7e1921241a8aba3b6a960446a94b9af5c6a61b1f4b5e74b9144996d1e5
+  - path: model-00005-of-00006.safetensors
+    size_bytes: 2496520552
+    sha256: b1ae92eaf4f09d4f2a901d7e9023c2605d219bbc7b9713b5c7dd8a096499cef3
+  - path: model-00006-of-00006.safetensors
+    size_bytes: 1355609712
+    sha256: 4623b0bdbd5bb34ad596063121136d0480a01af19285311bae5fd3965dc87d13
+  - path: model.safetensors.index.json
+    size_bytes: 287214
+    sha256: af8d457e3ba5eceece4ec3f2b28ff816c94e0fe0443cbdb28baf95ea1284f42f
+  total_artifact_bytes: 13839007662

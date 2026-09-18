@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/machine_baseline.schema.json",
+  "title": "UMA-QMoE MachineBaseline v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "captured_at",
+    "target_id",
+    "host",
+    "memory",
+    "software",
+    "accelerators"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "machine_baseline" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostname", "system", "kernel", "architecture", "cpu_model"],
+      "properties": {
+        "hostname": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "system": { "type": "string", "minLength": 1 },
+        "kernel": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 },
+        "cpu_model": { "type": "string", "minLength": 1 }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_bytes", "available_bytes"],
+      "properties": {
+        "total_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "available_bytes": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "software": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "docker", "git", "hipconfig", "nvcc"],
+      "properties": {
+        "python": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "version", "implementation"],
+          "properties": {
+            "status": { "const": "available" },
+            "version": { "type": "string", "minLength": 1 },
+            "implementation": { "type": "string", "minLength": 1 }
+          }
+        },
+        "docker": { "$ref": "#/$defs/versionProbe" },
+        "git": { "$ref": "#/$defs/versionProbe" },
+        "hipconfig": { "$ref": "#/$defs/versionProbe" },
+        "nvcc": { "$ref": "#/$defs/versionProbe" }
+      }
+    },
+    "accelerators": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nvidia_smi", "rocminfo"],
+      "properties": {
+        "nvidia_smi": {
+          "allOf": [
+            { "$ref": "#/$defs/probeStatus" },
+            {
+              "type": "object",
+              "required": ["devices"],
+              "properties": {
+                "devices": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "driver_version", "compute_capability", "memory_total_bytes"],
+                    "properties": {
+                      "name": { "type": "string", "minLength": 1 },
+                      "driver_version": { "type": "string", "minLength": 1 },
+                      "compute_capability": { "type": "string", "minLength": 1 },
+                      "memory_total_bytes": { "type": ["integer", "null"], "minimum": 0 }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "rocminfo": {
+          "allOf": [
+            { "$ref": "#/$defs/probeStatus" },
+            {
+              "type": "object",
+              "required": ["devices"],
+              "properties": {
+                "devices": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "architecture"],
+                    "properties": {
+                      "name": { "type": "string", "minLength": 1 },
+                      "architecture": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "probeStatus": {
+      "type": "object",
+      "properties": {
+        "status": { "enum": ["available", "unavailable", "error"] },
+        "reason": {
+          "enum": ["command_not_found", "timeout", "execution_failed", "nonzero_exit"]
+        }
+      },
+      "required": ["status"]
+    },
+    "versionProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "version"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable", "error"] },
+        "version": { "type": ["string", "null"] },
+        "reason": {
+          "enum": ["command_not_found", "timeout", "execution_failed", "nonzero_exit"]
+        }
+      }
+    }
+  }
+}

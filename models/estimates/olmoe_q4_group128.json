@@ -1,0 +1,51 @@
+{
+  "counts": {
+    "dense_parameter_count": 476710912,
+    "dense_tensor_count": 147,
+    "expert_parameter_count": 6442450944,
+    "expert_tensor_count": 3072
+  },
+  "exclusions": [
+    "activation and workspace traffic",
+    "attention KV-cache reads and writes",
+    "cache reuse and hardware traffic amplification",
+    "ExpertPack container headers"
+  ],
+  "generated_at": "2026-09-17T10:48:08Z",
+  "kind": "weight_traffic_estimate",
+  "model": {
+    "num_experts": 64,
+    "num_layers": 16,
+    "top_k": 8
+  },
+  "model_manifest_path": "models/manifests/olmoe_1b_7b_0125.yaml",
+  "model_manifest_sha256": "86b64e02741c58be9ba23cc617eb7c6f36e01d7216577fa874885b708f245dfb",
+  "per_token": {
+    "active_expert_metadata_bytes": 12582912,
+    "active_expert_padding_bytes": 0,
+    "active_expert_payload_bytes": 402653184,
+    "dense_weight_bytes": 747380736,
+    "embedding_lookup": "one_row_per_token",
+    "expert_selection": "worst_case_top_k_per_layer",
+    "total_weight_bytes": 1162616832
+  },
+  "quantization": {
+    "dense_bits_per_element": 16,
+    "expert_bits_per_element": 4,
+    "group_size": 128,
+    "scale_bytes_per_group": 2,
+    "tensor_alignment_bytes": 128,
+    "zero_point_bytes_per_group": 0
+  },
+  "scenario": "decode_batch1_cold_weight_read",
+  "schema_version": 1,
+  "storage": {
+    "dense_weight_bytes": 953421824,
+    "expert_metadata_bytes": 100663296,
+    "expert_padding_bytes": 0,
+    "expert_payload_bytes": 3221225472,
+    "total_weight_bytes": 4275310592
+  },
+  "tensor_inventory_path": "models/inventories/olmoe_1b_7b_0125_f32.json",
+  "tensor_inventory_sha256": "70575bcf1bc9480486f7fd02a4f06488e01478c4e31a6b37ab4f04cf6eea8c03"
+}
