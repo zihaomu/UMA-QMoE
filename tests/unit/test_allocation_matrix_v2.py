@@ -91,16 +91,22 @@ def _raw() -> dict:
 
 
 def _point() -> dict:
+    passing = _raw()
+    passing["cases"] = [
+        _measured_case("managed_unified"),
+        _measured_case("system_pageable_direct"),
+        _measured_case("platform_vmm"),
+    ]
     normalized = _normalize_native_output(
-        _raw(),
+        passing,
         backend="cuda",
         requested_buffer_bytes=_SIZE,
         measured_iterations=3,
         inner_iterations=2,
     )
     normalized.pop("runtime")
-    normalized["measured_case_count"] = 1
-    normalized["unavailable_case_count"] = 2
+    normalized["measured_case_count"] = 3
+    normalized["unavailable_case_count"] = 0
     return normalized
 
 
@@ -122,7 +128,9 @@ def _document() -> dict:
         {"swap_current_bytes": 0, "swap_max_bytes": 0, "events": _events()},
     )
     gates = {
-        "minimum_coverage_passed": True,
+        "required_paths_passed": True,
+        "required_touch_chains_passed": True,
+        "required_contention_passed": True,
         "steady_state_stability_passed": True,
         **memory_gates,
         "overall_passed": True,
@@ -253,6 +261,19 @@ def test_v2_document_validates_and_recomputes_gates() -> None:
     with pytest.raises(ContractError, match="inconsistent with raw samples"):
         validate_allocation_matrix_v2_document(tampered_summary)
 
+    missing_required_path = copy.deepcopy(evidence)
+    missing_required_path["pressure_points"][0]["cases"][1] = {
+        "id": "system_pageable_direct",
+        "status": "unavailable",
+        "allocation_api": "native_test_allocator",
+        "access_path": "native_test_access",
+        "reason": "pageable_allocation_failed",
+    }
+    missing_required_path["pressure_points"][0]["measured_case_count"] = 2
+    missing_required_path["pressure_points"][0]["unavailable_case_count"] = 1
+    with pytest.raises(ContractError, match="gates do not match"):
+        validate_allocation_matrix_v2_document(missing_required_path)
+
 
 def test_system_activity_uses_workload_cgroup_for_swap_and_oom_gates() -> None:
     activity, gates = _system_activity(
@@ -315,3 +336,14 @@ def test_cuda_compile_uses_nvcc_host_thread_flag(tmp_path: Path) -> None:
     assert "-Xcompiler=-pthread" in command
     assert "-pthread" not in command
     assert "-lcuda" in command
+
+
+def test_native_read_kernel_avoids_global_atomic_contention() -> None:
+    source = Path("benchmarks/native/allocation_matrix_v2.cu").read_text(
+        encoding="utf-8"
+    )
+    read_kernel = source.split("__global__ void read_kernel", 1)[1].split(
+        "template <typename Launch>", 1
+    )[0]
+    assert "atomicAdd" not in read_kernel
+    assert "sink[blockIdx.x]" in read_kernel

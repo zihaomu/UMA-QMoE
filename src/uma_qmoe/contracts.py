@@ -20,6 +20,10 @@ SCHEMA_BY_KIND = {
     "artifact_verification": "artifact_verification.schema.json",
     "bandwidth_soak": "bandwidth_soak.schema.json",
     "benchmark_contract": "benchmark_contract.schema.json",
+    "compressed_loader_evidence": "compressed_loader_evidence.schema.json",
+    "custom_operator_evidence": "custom_operator_evidence.schema.json",
+    "external_baseline": "external_baseline.schema.json",
+    "expert_pack_manifest": "expert_pack_manifest.schema.json",
     "hardware_counter_calibration": "hardware_counter_calibration.schema.json",
     "machine_baseline": "machine_baseline.schema.json",
     "memory_bandwidth_benchmark": "memory_bandwidth_benchmark.schema.json",
@@ -27,12 +31,18 @@ SCHEMA_BY_KIND = {
     "model_acquisition": "model_acquisition.schema.json",
     "model_derivation": "model_derivation.schema.json",
     "memory_snapshot": "memory_snapshot.schema.json",
+    "mixed_precision_sensitivity": "mixed_precision_sensitivity.schema.json",
     "native_stream_benchmark": "native_stream_benchmark.schema.json",
     "model_manifest": "model_manifest.schema.json",
     "oracle_smoke": "oracle_smoke.schema.json",
+    "packed_q4_kernel_evidence": "packed_q4_kernel_evidence.schema.json",
     "public_baseline": "public_baseline.schema.json",
+    "reference_host_baseline": "reference_host_baseline.schema.json",
     "reference_oracle_comparison": "reference_oracle_comparison.schema.json",
+    "reference_oracle_policy": "reference_oracle_policy.schema.json",
     "run_manifest": "run_manifest.schema.json",
+    "route_trace": "route_trace.schema.json",
+    "route_trace_replay": "route_trace_replay.schema.json",
     "safe_uma_budget": "safe_uma_budget.schema.json",
     "target_inventory": "target_inventory.schema.json",
     "tensor_inventory": "tensor_inventory.schema.json",
@@ -41,7 +51,9 @@ SCHEMA_BY_KIND = {
 
 # Operational timestamps do not change the identity of an otherwise identical
 # contract. Status deliberately remains part of the identity.
-NON_IDENTITY_KEYS = frozenset({"captured_at", "created_at", "generated_at", "resolved_at"})
+NON_IDENTITY_KEYS = frozenset(
+    {"captured_at", "created_at", "generated_at", "resolved_at"}
+)
 
 
 class ContractError(ValueError):
@@ -75,7 +87,9 @@ def _schema_for_kind(kind: str) -> dict[str, Any]:
         schema_name = SCHEMA_BY_KIND[kind]
     except KeyError as exc:
         supported = ", ".join(sorted(SCHEMA_BY_KIND))
-        raise ContractError(f"unsupported contract kind {kind!r}; expected one of: {supported}") from exc
+        raise ContractError(
+            f"unsupported contract kind {kind!r}; expected one of: {supported}"
+        ) from exc
 
     schema_resource = resources.files("uma_qmoe.schemas").joinpath(schema_name)
     return json.loads(schema_resource.read_text(encoding="utf-8"))
@@ -108,18 +122,25 @@ def _require_project_relative_path(path: str, field: str) -> None:
         raise ContractError(f"{field} must be a safe project-relative POSIX path")
 
 
-def validate_document(document: Mapping[str, Any], *, require_frozen: bool = False) -> None:
+def validate_document(
+    document: Mapping[str, Any], *, require_frozen: bool = False
+) -> None:
     """Validate schema and invariants that do not require external files."""
 
     kind = document.get("kind")
     if not isinstance(kind, str):
         raise ContractError("$.kind must be a string")
 
-    validator = Draft202012Validator(_schema_for_kind(kind), format_checker=FormatChecker())
-    errors = sorted(validator.iter_errors(document), key=lambda error: list(error.absolute_path))
+    validator = Draft202012Validator(
+        _schema_for_kind(kind), format_checker=FormatChecker()
+    )
+    errors = sorted(
+        validator.iter_errors(document), key=lambda error: list(error.absolute_path)
+    )
     if errors:
         details = "; ".join(
-            f"{_format_path(list(error.absolute_path))}: {error.message}" for error in errors
+            f"{_format_path(list(error.absolute_path))}: {error.message}"
+            for error in errors
         )
         raise ContractError(details)
 
@@ -141,7 +162,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
             artifact["path"].endswith(".safetensors")
             for artifact in document["weights"]["artifacts"]
         ):
-            raise ContractError("$.weights.artifacts must contain at least one Safetensors shard")
+            raise ContractError(
+                "$.weights.artifacts must contain at least one Safetensors shard"
+            )
         tensor_inventory = document["weights"].get("tensor_inventory")
         if tensor_inventory is not None:
             _require_project_relative_path(
@@ -153,6 +176,12 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         target_ids = [target["id"] for target in document["targets"]]
         if len(target_ids) != len(set(target_ids)):
             raise ContractError("$.targets contains duplicate target ids")
+        for target in document["targets"]:
+            baseline_ids = [baseline["id"] for baseline in target["external_baselines"]]
+            if len(baseline_ids) != len(set(baseline_ids)):
+                raise ContractError(
+                    f"target {target['id']!r} contains duplicate external baseline ids"
+                )
         workload_ids = [workload["id"] for workload in document["workloads"]]
         if len(workload_ids) != len(set(workload_ids)):
             raise ContractError("$.workloads contains duplicate workload ids")
@@ -184,12 +213,12 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
                     trace_reference["path"],
                     f"quality gate {gate['id']!r} trace_reference.path",
                 )
-        budget_references = document["resource_gates"]["safe_uma_budget"][
-            "references"
-        ]
+        budget_references = document["resource_gates"]["safe_uma_budget"]["references"]
         budget_target_ids = [reference["target_id"] for reference in budget_references]
         if len(budget_target_ids) != len(set(budget_target_ids)):
-            raise ContractError("Safe UMA Budget references contain duplicate target ids")
+            raise ContractError(
+                "Safe UMA Budget references contain duplicate target ids"
+            )
         for reference in budget_references:
             _require_project_relative_path(
                 reference["path"],
@@ -197,17 +226,204 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
             )
         if require_frozen:
             _require_benchmark_frozen(document)
+    elif kind == "compressed_loader_evidence":
+        loader = document["loader"]
+        gates = document["gates"]
+        expected = {
+            "dense_only_checkpoint_load": loader["loaded_expert_tensor_count"] == 0,
+            "no_expert_parameters": loader["expert_parameter_count"] == 0,
+            "single_pack_mapping": loader["expert_pack_mapping_count"] == 1,
+            "no_full_dequantized_copy": (
+                loader["model_parameter_bytes"] < loader["expert_pack_size_bytes"]
+            ),
+            "full_model_forward": document["smoke"]["finite"],
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError(
+                "Compressed loader gate does not match measured evidence"
+            )
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Compressed loader overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Compressed loader status is inconsistent")
+    elif kind == "custom_operator_evidence":
+        operator = document["operator"]
+        reference = document["reference"]
+        performance = document["performance_mode"]
+        gates = document["gates"]
+        expected_platform = {
+            "halo3": "hip_gfx1151",
+            "spark1": "cuda_sm121",
+        }[document["target_id"]]
+        expected = {
+            "operator_registered": operator["registered"],
+            "architecture_dispatch": operator["platform"] == expected_platform,
+            "cpu_reference_forward": reference["cpu_finite"],
+            "target_reference_forward": reference["target_finite"],
+            "cpu_target_agreement": (
+                reference["max_abs_error"] <= reference["acceptance"]["max_abs_error"]
+                and reference["cosine_similarity"]
+                >= reference["acceptance"]["minimum_cosine_similarity"]
+            ),
+            "performance_mode_fail_closed": (
+                performance["requested"]
+                and not performance["backend_registered"]
+                and performance["rejected"]
+                and "silent reference fallback is forbidden" in performance["error"]
+            ),
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Custom operator gate does not match measured evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Custom operator overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Custom operator status is inconsistent")
+    elif kind == "packed_q4_kernel_evidence":
+        kernel = document["kernel"]
+        correctness = document["correctness"]
+        performance = document["performance"]
+        gates = document["gates"]
+        expected_platform = {
+            "halo3": "hip_gfx1151",
+            "spark1": "cuda_sm121",
+        }[document["target_id"]]
+        acceptance = correctness["acceptance"]
+        projection_results = correctness["projection_results"]
+        names = [result["name"] for result in projection_results]
+        if sorted(names) != ["down_proj", "gate_proj", "up_proj"]:
+            raise ContractError("Packed Q4 evidence must cover each projection once")
+        projection_correctness = all(
+            result["finite"]
+            and result["max_absolute_error"] <= acceptance["max_absolute_error"]
+            and result["cosine_similarity"] >= acceptance["minimum_cosine_similarity"]
+            for result in projection_results
+        )
+        moe = correctness["moe_forward"]
+        moe_correctness = (
+            moe["finite"]
+            and moe["max_absolute_error"] <= acceptance["max_absolute_error"]
+            and moe["cosine_similarity"] >= acceptance["minimum_cosine_similarity"]
+        )
+        samples = performance["samples_milliseconds"]
+        expected_median = statistics.median(samples)
+        expected_p95 = _nearest_rank_percentile(samples, 0.95)
+        if not math.isclose(
+            performance["median_milliseconds"], expected_median, rel_tol=1e-9
+        ) or not math.isclose(
+            performance["p95_milliseconds"], expected_p95, rel_tol=1e-9
+        ):
+            raise ContractError("Packed Q4 timing summary does not match samples")
+        expected = {
+            "target_architecture": kernel["platform"] == expected_platform,
+            "target_compilation": kernel["compiled_for_target"],
+            "direct_packed_input": kernel["reads_packed_weights_directly"],
+            "no_dequantized_weight_cache": (
+                not kernel["full_dequantized_weight_cache"]
+                and performance["dequantized_weight_cache_bytes"] == 0
+            ),
+            "projection_correctness": projection_correctness,
+            "moe_correctness": moe_correctness,
+            "performance_mode_executed": len(samples)
+            == document["workload"]["measured_iterations"],
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Packed Q4 gate does not match measured evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Packed Q4 overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Packed Q4 status is inconsistent")
+    elif kind == "mixed_precision_sensitivity":
+        rows = document["rows"]
+        baseline = document["all_q4_baseline"]
+        layers = [row["restored_layer"] for row in rows]
+        if sorted(layers) != list(range(16)):
+            raise ContractError("Mixed-precision matrix must cover layers 0 through 15")
+        for row in rows:
+            metrics = row["metrics"]
+            expected_delta = {
+                "router_exact_set_agreement": (
+                    metrics["router_exact_set_agreement"]
+                    - baseline["router_exact_set_agreement"]
+                ),
+                "router_mean_set_overlap": (
+                    metrics["router_mean_set_overlap"]
+                    - baseline["router_mean_set_overlap"]
+                ),
+                "logit_cosine_similarity": (
+                    metrics["logit_cosine_similarity"]
+                    - baseline["logit_cosine_similarity"]
+                ),
+            }
+            if any(
+                not math.isclose(
+                    row["delta_vs_all_q4"][name], value, rel_tol=1e-9, abs_tol=1e-12
+                )
+                for name, value in expected_delta.items()
+            ):
+                raise ContractError("Mixed-precision row delta is inconsistent")
+        expected_ranking = [
+            row["restored_layer"]
+            for row in sorted(
+                rows,
+                key=lambda row: (
+                    -row["delta_vs_all_q4"]["router_exact_set_agreement"],
+                    -row["delta_vs_all_q4"]["logit_cosine_similarity"],
+                    row["restored_layer"],
+                ),
+            )
+        ]
+        if document["ranking"] != expected_ranking:
+            raise ContractError("Mixed-precision ranking is inconsistent")
+        storage = document["storage"]
+        expected_mixed_bytes = (
+            storage["all_q4_bytes"]
+            - storage["replaced_q4_layer_bytes"]
+            + storage["single_bf16_layer_bytes"]
+        )
+        if storage["single_layer_mixed_bytes"] != expected_mixed_bytes:
+            raise ContractError("Mixed-precision storage accounting is inconsistent")
+        gates = document["gates"]
+        expected = {
+            "reference_finite": document["reference"]["finite"],
+            "all_q4_finite": baseline["finite"],
+            "all_layers_covered": sorted(layers) == list(range(16)),
+            "matrix_finite": all(row["finite"] for row in rows),
+            "quality_gate_unchanged": True,
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Mixed-precision gate does not match evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Mixed-precision overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Mixed-precision status is inconsistent")
     elif kind == "run_manifest":
-        forbidden_fragments = ("SECRET", "TOKEN", "PASSWORD", "CREDENTIAL", "PRIVATE_KEY")
+        forbidden_fragments = (
+            "SECRET",
+            "TOKEN",
+            "PASSWORD",
+            "CREDENTIAL",
+            "PRIVATE_KEY",
+        )
         names = document["command"]["environment_allowlist"]
         unsafe_names = [
-            name for name in names if any(fragment in name.upper() for fragment in forbidden_fragments)
+            name
+            for name in names
+            if any(fragment in name.upper() for fragment in forbidden_fragments)
         ]
         if unsafe_names:
             raise ContractError(
                 "$.command.environment_allowlist contains secret-like names: "
                 + ", ".join(sorted(unsafe_names))
             )
+        artifact_paths = [item["path"] for item in document["raw_artifacts"]]
+        if len(artifact_paths) != len(set(artifact_paths)):
+            raise ContractError("RunManifest raw artifacts contain duplicate paths")
+        for path in artifact_paths:
+            _require_project_relative_path(path, "RunManifest raw artifact path")
     elif kind == "allocation_matrix_v2":
         from .allocation_matrix_v2 import validate_allocation_matrix_v2_document
 
@@ -222,6 +438,37 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
             validate_reference_oracle_comparison(document)
         except ReferenceOracleError as exc:
             raise ContractError(str(exc)) from exc
+    elif kind == "reference_oracle_policy":
+        scope = document["scope"]
+        level = scope["level"]
+        layer = scope["layer_index"]
+        expert = scope["expert_index"]
+        if level == "single_expert":
+            if layer is None or expert is None:
+                raise ContractError("single_expert policy requires layer and expert")
+            if document["policy"]["min_router_top_k_set_agreement"] is not None:
+                raise ContractError(
+                    "single_expert policy must not set router agreement"
+                )
+        elif level == "single_moe_layer":
+            if layer is None or expert is not None:
+                raise ContractError("single_moe_layer policy requires only layer")
+            if document["policy"]["min_router_top_k_set_agreement"] is None:
+                raise ContractError("single_moe_layer policy requires router agreement")
+        else:
+            if layer is not None or expert is not None:
+                raise ContractError("full_model policy forbids layer and expert")
+            if document["policy"]["min_router_top_k_set_agreement"] is None:
+                raise ContractError("full_model policy requires router agreement")
+    elif kind == "route_trace":
+        from .route_trace import validate_route_trace_document
+
+        validate_route_trace_document(document)
+    elif kind == "route_trace_replay":
+        if document["event_layer_records"] != (
+            document["event_count"] * document["layer_count"]
+        ):
+            raise ContractError("RouteTrace replay record count is inconsistent")
     elif kind == "public_baseline":
         results = document["results"]
         duration = results["duration_seconds"]
@@ -237,15 +484,17 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
             not math.isclose(results[field], expected, rel_tol=1e-6, abs_tol=1e-9)
             for field, expected in expected_throughput.items()
         ):
-            raise ContractError("Public Baseline throughput does not match counts/duration")
+            raise ContractError(
+                "Public Baseline throughput does not match counts/duration"
+            )
         for name in ("ttft_ms", "tpot_ms", "e2el_ms"):
             summary = results[name]
-            if not (
-                summary["p50"]
-                <= summary["p95"]
-                <= summary["p99"]
-                <= summary["max"]
-            ) or summary["mean"] > summary["max"]:
+            if (
+                not (
+                    summary["p50"] <= summary["p95"] <= summary["p99"] <= summary["max"]
+                )
+                or summary["mean"] > summary["max"]
+            ):
                 raise ContractError(f"Public Baseline {name} summary is invalid")
         paths = [artifact["path"] for artifact in document["raw_artifacts"]]
         if len(paths) != len(set(paths)):
@@ -259,6 +508,25 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         expected_status = "passed" if expected_overall else "failed"
         if document["status"] != expected_status:
             raise ContractError("Public Baseline status does not match its gates")
+    elif kind == "external_baseline":
+        from .baseline_common import validate_baseline_semantics
+
+        validate_baseline_semantics(document, "External Baseline")
+    elif kind == "expert_pack_manifest":
+        header = document["header"]
+        if header["tensor_count"] != len(header["tensors"]):
+            raise ContractError("ExpertPack manifest tensor count is inconsistent")
+        names = [tensor["name"] for tensor in header["tensors"]]
+        if len(names) != len(set(names)):
+            raise ContractError("ExpertPack manifest contains duplicate tensor names")
+        if document["artifact"]["size_bytes"] != (
+            document["payload_offset"] + document["payload_length"]
+        ):
+            raise ContractError("ExpertPack manifest artifact size is inconsistent")
+    elif kind == "reference_host_baseline":
+        from .baseline_common import validate_baseline_semantics
+
+        validate_baseline_semantics(document, "Reference Host Baseline")
     elif kind == "target_inventory":
         target_ids = [target["id"] for target in document["targets"]]
         ssh_hosts = [target["ssh_host"] for target in document["targets"]]
@@ -276,7 +544,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         )
         observed_reserved = sum(document[name] for name in component_names)
         if observed_reserved != document["total_reserved_bytes"]:
-            raise ContractError("$.total_reserved_bytes does not equal the reserve components")
+            raise ContractError(
+                "$.total_reserved_bytes does not equal the reserve components"
+            )
         cgroup_limit = document["cgroup_memory_max_bytes"]
         expected_physical_limit = (
             document["mem_total_bytes"]
@@ -289,7 +559,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
             )
         expected_budget = document["physical_limit_bytes"] - observed_reserved
         if expected_budget < 0 or expected_budget != document["safe_budget_bytes"]:
-            raise ContractError("$.safe_budget_bytes does not match physical limit minus reserves")
+            raise ContractError(
+                "$.safe_budget_bytes does not match physical limit minus reserves"
+            )
         if require_frozen and document["status"] != "frozen":
             raise ContractError("Safe UMA Budget is draft; frozen validation requested")
         if document["status"] == "frozen":
@@ -310,14 +582,24 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         ]
         if len(tensor_names) != len(set(tensor_names)):
             raise ContractError("TensorInventory contains duplicate tensor names")
-        observed_tensor_count = sum(len(shard["tensors"]) for shard in document["shards"])
+        observed_tensor_count = sum(
+            len(shard["tensors"]) for shard in document["shards"]
+        )
         if observed_tensor_count != document["tensor_count"]:
-            raise ContractError("$.tensor_count does not equal the shard tensor entries")
+            raise ContractError(
+                "$.tensor_count does not equal the shard tensor entries"
+            )
         observed_dtypes = sorted(
-            {tensor["dtype"] for shard in document["shards"] for tensor in shard["tensors"]}
+            {
+                tensor["dtype"]
+                for shard in document["shards"]
+                for tensor in shard["tensors"]
+            }
         )
         if observed_dtypes != document["observed_dtypes"]:
-            raise ContractError("$.observed_dtypes does not equal the shard tensor dtypes")
+            raise ContractError(
+                "$.observed_dtypes does not equal the shard tensor dtypes"
+            )
     elif kind == "model_acquisition":
         file_paths = [entry["path"] for entry in document["files"]]
         if len(file_paths) != len(set(file_paths)):
@@ -325,7 +607,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         for path in file_paths:
             _require_project_relative_path(path, f"model acquisition path {path!r}")
         if document["file_count"] != len(document["files"]):
-            raise ContractError("$.file_count does not equal the number of file entries")
+            raise ContractError(
+                "$.file_count does not equal the number of file entries"
+            )
         total_bytes = sum(entry["size_bytes"] for entry in document["files"])
         if document["total_bytes"] != total_bytes:
             raise ContractError("$.total_bytes does not equal the file entry sizes")
@@ -339,7 +623,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         for path in file_paths:
             _require_project_relative_path(path, f"artifact verification path {path!r}")
         if document["file_count"] != len(document["files"]):
-            raise ContractError("$.file_count does not equal the number of file entries")
+            raise ContractError(
+                "$.file_count does not equal the number of file entries"
+            )
         total_bytes = sum(entry["size_bytes"] for entry in document["files"])
         if document["total_bytes"] != total_bytes:
             raise ContractError("$.total_bytes does not equal the file entry sizes")
@@ -405,18 +691,29 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         samples = document["samples"]
         sample_count = len(samples)
         if [sample["sample_index"] for sample in samples] != list(range(sample_count)):
-            raise ContractError("$.samples must use consecutive zero-based sample_index values")
+            raise ContractError(
+                "$.samples must use consecutive zero-based sample_index values"
+            )
         monotonic = [sample["monotonic_ns"] for sample in samples]
         elapsed = [sample["elapsed_from_start_seconds"] for sample in samples]
-        if any(current <= previous for previous, current in zip(monotonic, monotonic[1:])):
-            raise ContractError("$.samples monotonic_ns values must be strictly increasing")
+        if any(
+            current <= previous for previous, current in zip(monotonic, monotonic[1:])
+        ):
+            raise ContractError(
+                "$.samples monotonic_ns values must be strictly increasing"
+            )
         if any(current <= previous for previous, current in zip(elapsed, elapsed[1:])):
             raise ContractError("$.samples elapsed values must be strictly increasing")
         configuration = document["configuration"]
         if not math.isclose(
-            configuration["actual_duration_seconds"], elapsed[-1], rel_tol=1e-12, abs_tol=1e-9
+            configuration["actual_duration_seconds"],
+            elapsed[-1],
+            rel_tol=1e-12,
+            abs_tol=1e-9,
         ):
-            raise ContractError("$.configuration.actual_duration_seconds must match the last sample")
+            raise ContractError(
+                "$.configuration.actual_duration_seconds must match the last sample"
+            )
         actual_bytes = configuration["actual_buffer_bytes"]
         inner_iterations = configuration["inner_iterations"]
         expected_traffic = {
@@ -427,20 +724,30 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         operations = document["operations"]
         observed_ids = [operation["id"] for operation in operations]
         if len(observed_ids) != 3 or set(observed_ids) != set(operation_ids):
-            raise ContractError("$.operations must contain every soak operation exactly once")
+            raise ContractError(
+                "$.operations must contain every soak operation exactly once"
+            )
         by_id = {operation["id"]: operation for operation in operations}
         for operation_id in operation_ids:
             operation = by_id[operation_id]
             expected_read, expected_write = expected_traffic[operation_id]
             total_bytes = expected_read + expected_write
             if operation["algorithmic_read_bytes"] != expected_read:
-                raise ContractError(f"soak operation {operation_id!r} has invalid read bytes")
+                raise ContractError(
+                    f"soak operation {operation_id!r} has invalid read bytes"
+                )
             if operation["algorithmic_write_bytes"] != expected_write:
-                raise ContractError(f"soak operation {operation_id!r} has invalid write bytes")
+                raise ContractError(
+                    f"soak operation {operation_id!r} has invalid write bytes"
+                )
             if operation["algorithmic_total_bytes"] != total_bytes:
-                raise ContractError(f"soak operation {operation_id!r} has invalid total bytes")
+                raise ContractError(
+                    f"soak operation {operation_id!r} has invalid total bytes"
+                )
             if operation["sample_count"] != sample_count:
-                raise ContractError(f"soak operation {operation_id!r} has invalid sample count")
+                raise ContractError(
+                    f"soak operation {operation_id!r} has invalid sample count"
+                )
             bandwidth = [
                 total_bytes / sample["timings_seconds"][operation_id] / 1_000_000_000
                 for sample in samples
@@ -463,7 +770,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
                 "drift_fraction": (last_window - first_window) / first_window,
             }
             if operation["drift_window_samples"] != window:
-                raise ContractError(f"soak operation {operation_id!r} has invalid drift window")
+                raise ContractError(
+                    f"soak operation {operation_id!r} has invalid drift window"
+                )
             for field, expected_value in expected_summary.items():
                 if not math.isclose(
                     operation[field], expected_value, rel_tol=1e-12, abs_tol=1e-12
@@ -477,7 +786,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         ) or memory["swap_out_pages_delta"] != (
             memory["swap_out_pages_after"] - memory["swap_out_pages_before"]
         ):
-            raise ContractError("$.memory swap deltas do not match before/after counters")
+            raise ContractError(
+                "$.memory swap deltas do not match before/after counters"
+            )
         telemetry = document["telemetry"]
         telemetry_samples = telemetry["samples"]
         telemetry_monotonic = [sample["monotonic_ns"] for sample in telemetry_samples]
@@ -505,10 +816,14 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
                 observed_value = summary[summary_field]
                 if expected_value is None:
                     if observed_value is not None:
-                        raise ContractError(f"telemetry summary {field!r} should be unavailable")
+                        raise ContractError(
+                            f"telemetry summary {field!r} should be unavailable"
+                        )
                 elif summary_field == "available_samples":
                     if observed_value != expected_value:
-                        raise ContractError(f"telemetry summary {field!r} has invalid count")
+                        raise ContractError(
+                            f"telemetry summary {field!r} has invalid count"
+                        )
                 elif not math.isclose(
                     observed_value, expected_value, rel_tol=1e-12, abs_tol=1e-12
                 ):
@@ -569,7 +884,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         if workload_cgroup is not None:
             assert swap_disabled_passed is not None
             assert no_oom_events_passed is not None
-            expected_gates["workload_cgroup_swap_disabled_passed"] = swap_disabled_passed
+            expected_gates["workload_cgroup_swap_disabled_passed"] = (
+                swap_disabled_passed
+            )
             expected_gates["no_oom_events_passed"] = no_oom_events_passed
         expected_gates["overall_passed"] = (
             duration_passed
@@ -602,7 +919,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         cases = document["cases"]
         case_ids = [case["id"] for case in cases]
         if len(case_ids) != len(set(case_ids)) or set(case_ids) != expected_ids:
-            raise ContractError("$.cases must contain every Allocation Matrix case exactly once")
+            raise ContractError(
+                "$.cases must contain every Allocation Matrix case exactly once"
+            )
         buffer_bytes = document["configuration"]["actual_buffer_bytes"]
         for case in cases:
             if case["status"] == "measured":
@@ -632,7 +951,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         build = document["build"]
         expected_compiler = "nvcc" if build["backend"] == "cuda" else "hipcc"
         if build["compiler"] != expected_compiler:
-            raise ContractError("native allocation capability compiler/backend mismatch")
+            raise ContractError(
+                "native allocation capability compiler/backend mismatch"
+            )
         attributes = document["runtime"]["attributes"]
         expected_attributes = {
             "managed_memory",
@@ -681,7 +1002,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
                     f"native operation {operation['id']!r} has invalid total bytes"
                 )
     elif kind == "hardware_counter_calibration":
-        _require_project_relative_path(document["native_source"]["path"], "$.native_source.path")
+        _require_project_relative_path(
+            document["native_source"]["path"], "$.native_source.path"
+        )
         expected = {
             "read_reduce.read": ("read_reduce", "read", "GL2C_EA_RDREQ_DRAM_sum", 128),
             "write.write": ("write", "write", "GCEA_WDRAM_SIZE_REQ_sum", 32),
@@ -691,7 +1014,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
         calibrations = document["calibrations"]
         ids = [item["id"] for item in calibrations]
         if len(ids) != 4 or set(ids) != set(expected):
-            raise ContractError("$.calibrations must contain every required mapping exactly once")
+            raise ContractError(
+                "$.calibrations must contain every required mapping exactly once"
+            )
         known_bytes = document["configuration"]["known_bytes_per_dispatch"]
         threshold = document["configuration"]["maximum_relative_error"]
         sample_count = document["configuration"]["profiled_dispatches_per_operation"]
@@ -704,7 +1029,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
                 or item["counter_name"] != counter
                 or item["bytes_per_count"] != scale
             ):
-                raise ContractError(f"counter calibration {item['id']!r} has an invalid mapping")
+                raise ContractError(
+                    f"counter calibration {item['id']!r} has an invalid mapping"
+                )
             arrays = (
                 item["dispatch_ids"],
                 item["raw_counter_values"],
@@ -712,32 +1039,54 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
                 item["relative_errors"],
             )
             if any(len(values) != sample_count for values in arrays):
-                raise ContractError(f"counter calibration {item['id']!r} sample counts differ")
+                raise ContractError(
+                    f"counter calibration {item['id']!r} sample counts differ"
+                )
             if item["dispatch_ids"] != sorted(set(item["dispatch_ids"])):
-                raise ContractError(f"counter calibration {item['id']!r} dispatch IDs are invalid")
+                raise ContractError(
+                    f"counter calibration {item['id']!r} dispatch IDs are invalid"
+                )
             measured = [value * scale for value in item["raw_counter_values"]]
             if item["measured_bytes"] != measured:
-                raise ContractError(f"counter calibration {item['id']!r} has invalid measured bytes")
+                raise ContractError(
+                    f"counter calibration {item['id']!r} has invalid measured bytes"
+                )
             errors = [abs(value - known_bytes) / known_bytes for value in measured]
             if any(
                 not math.isclose(observed, calculated, rel_tol=1e-12, abs_tol=1e-15)
-                for observed, calculated in zip(item["relative_errors"], errors, strict=True)
+                for observed, calculated in zip(
+                    item["relative_errors"], errors, strict=True
+                )
             ):
-                raise ContractError(f"counter calibration {item['id']!r} has invalid relative errors")
+                raise ContractError(
+                    f"counter calibration {item['id']!r} has invalid relative errors"
+                )
             median_error = statistics.median(errors)
             maximum_error = max(errors)
             if not math.isclose(
-                item["median_relative_error"], median_error, rel_tol=1e-12, abs_tol=1e-15
+                item["median_relative_error"],
+                median_error,
+                rel_tol=1e-12,
+                abs_tol=1e-15,
             ) or not math.isclose(
-                item["maximum_relative_error"], maximum_error, rel_tol=1e-12, abs_tol=1e-15
+                item["maximum_relative_error"],
+                maximum_error,
+                rel_tol=1e-12,
+                abs_tol=1e-15,
             ):
-                raise ContractError(f"counter calibration {item['id']!r} has invalid error summary")
+                raise ContractError(
+                    f"counter calibration {item['id']!r} has invalid error summary"
+                )
             passed = maximum_error <= threshold
             if item["status"] != ("passed" if passed else "failed"):
-                raise ContractError(f"counter calibration {item['id']!r} has invalid status")
+                raise ContractError(
+                    f"counter calibration {item['id']!r} has invalid status"
+                )
             all_passed = all_passed and passed
         if document["status"] != ("passed" if all_passed else "failed"):
-            raise ContractError("hardware counter calibration has invalid aggregate status")
+            raise ContractError(
+                "hardware counter calibration has invalid aggregate status"
+            )
     elif kind == "model_derivation":
         _require_project_relative_path(
             document["source"]["model_manifest_path"],
@@ -788,7 +1137,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
             )
         )
         if storage_total != storage["total_weight_bytes"]:
-            raise ContractError("$.storage.total_weight_bytes does not match components")
+            raise ContractError(
+                "$.storage.total_weight_bytes does not match components"
+            )
         per_token = document["per_token"]
         per_token_total = sum(
             per_token[field]
@@ -800,7 +1151,9 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
             )
         )
         if per_token_total != per_token["total_weight_bytes"]:
-            raise ContractError("$.per_token.total_weight_bytes does not match components")
+            raise ContractError(
+                "$.per_token.total_weight_bytes does not match components"
+            )
 
 
 def _require_model_frozen(document: Mapping[str, Any]) -> None:
@@ -830,7 +1183,9 @@ def _require_benchmark_frozen(document: Mapping[str, Any]) -> None:
         )
     budget_gate = document["resource_gates"]["safe_uma_budget"]
     if budget_gate["status"] != "frozen":
-        raise ContractError("frozen benchmark contract requires a frozen Safe UMA Budget")
+        raise ContractError(
+            "frozen benchmark contract requires a frozen Safe UMA Budget"
+        )
     target_ids = {target["id"] for target in document["targets"]}
     budget_target_ids = {
         reference["target_id"] for reference in budget_gate["references"]
@@ -839,9 +1194,15 @@ def _require_benchmark_frozen(document: Mapping[str, Any]) -> None:
         raise ContractError(
             "frozen benchmark contract requires one Safe UMA Budget reference per target"
         )
-    pending = [gate["id"] for gate in document["quality_gates"] if gate["applicability"] == "pending"]
+    pending = [
+        gate["id"]
+        for gate in document["quality_gates"]
+        if gate["applicability"] == "pending"
+    ]
     if pending:
-        raise ContractError(f"frozen benchmark contract has pending quality gates: {', '.join(pending)}")
+        raise ContractError(
+            f"frozen benchmark contract has pending quality gates: {', '.join(pending)}"
+        )
     threshold_fields = {
         "max_relative_nll_ppl_increase",
         "max_normalized_task_score_drop_points",
@@ -861,11 +1222,17 @@ def _require_benchmark_frozen(document: Mapping[str, Any]) -> None:
             raise ContractError(
                 f"required quality gate {gate['id']!r} has no quantitative threshold"
             )
-        if present_thresholds.intersection(dataset_thresholds) and "dataset" not in gate:
+        if (
+            present_thresholds.intersection(dataset_thresholds)
+            and "dataset" not in gate
+        ):
             raise ContractError(
                 f"required quality gate {gate['id']!r} requires a pinned dataset"
             )
-        if present_thresholds.intersection(trace_thresholds) and "trace_reference" not in gate:
+        if (
+            present_thresholds.intersection(trace_thresholds)
+            and "trace_reference" not in gate
+        ):
             raise ContractError(
                 f"required quality gate {gate['id']!r} requires a pinned trace reference"
             )
@@ -925,7 +1292,9 @@ def find_project_root(start: str | Path) -> Path:
     raise ContractError(f"cannot locate project root from {start}")
 
 
-def validate_file(path: str | Path, *, require_frozen: bool = False, check_references: bool = True) -> dict[str, Any]:
+def validate_file(
+    path: str | Path, *, require_frozen: bool = False, check_references: bool = True
+) -> dict[str, Any]:
     """Validate a document and, for benchmark contracts, its bound local inputs."""
 
     document_path = Path(path)
@@ -969,7 +1338,9 @@ def _validate_file_reference(
     return path
 
 
-def _validate_model_references(manifest: Mapping[str, Any], manifest_path: Path) -> None:
+def _validate_model_references(
+    manifest: Mapping[str, Any], manifest_path: Path
+) -> None:
     tensor_reference = manifest["weights"].get("tensor_inventory")
     if tensor_reference is None:
         return
@@ -984,7 +1355,9 @@ def _validate_model_references(manifest: Mapping[str, Any], manifest_path: Path)
     inventory = load_document(inventory_path)
     validate_document(inventory)
     if inventory["kind"] != "tensor_inventory":
-        raise ContractError("$.weights.tensor_inventory must reference a TensorInventory")
+        raise ContractError(
+            "$.weights.tensor_inventory must reference a TensorInventory"
+        )
     if inventory["model_manifest_sha256"] != tensor_reference["source_manifest_sha256"]:
         raise ContractError(
             "$.weights.tensor_inventory.source_manifest_sha256 does not match "
@@ -1019,11 +1392,17 @@ def _validate_model_derivation_references(
     )
     manifest = validate_file(manifest_path, require_frozen=True)
     if manifest["kind"] != "model_manifest":
-        raise ContractError("$.source.model_manifest_path must reference a ModelManifest")
+        raise ContractError(
+            "$.source.model_manifest_path must reference a ModelManifest"
+        )
     if manifest["model_id"] != source["model_id"]:
-        raise ContractError("model derivation source model_id does not match ModelManifest")
+        raise ContractError(
+            "model derivation source model_id does not match ModelManifest"
+        )
     if manifest["model_revision"] != source["model_revision"]:
-        raise ContractError("model derivation source revision does not match ModelManifest")
+        raise ContractError(
+            "model derivation source revision does not match ModelManifest"
+        )
 
     inventory_path = _validate_file_reference(
         root,
@@ -1033,7 +1412,9 @@ def _validate_model_derivation_references(
     )
     inventory = validate_file(inventory_path)
     if inventory["kind"] != "tensor_inventory":
-        raise ContractError("$.source.tensor_inventory_path must reference a TensorInventory")
+        raise ContractError(
+            "$.source.tensor_inventory_path must reference a TensorInventory"
+        )
     manifest_inventory = manifest["weights"]["tensor_inventory"]
     if (
         manifest_inventory["path"] != source["tensor_inventory_path"]
@@ -1119,7 +1500,10 @@ def _validate_benchmark_references(
         derivation = validate_file(derivation_path)
         if derivation["kind"] != "model_derivation":
             raise ContractError("$.oracle.derivation must reference a ModelDerivation")
-        if derivation["source"]["model_manifest_path"] != model_reference["manifest_path"]:
+        if (
+            derivation["source"]["model_manifest_path"]
+            != model_reference["manifest_path"]
+        ):
             raise ContractError(
                 "Oracle derivation source does not match the benchmark ModelManifest"
             )

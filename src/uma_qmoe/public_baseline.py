@@ -8,7 +8,7 @@ import json
 import math
 from pathlib import Path
 import statistics
-from typing import Any, Mapping
+from typing import Any
 
 from .contracts import ContractError, validate_document
 
@@ -73,6 +73,10 @@ def _identity(value: str, field: str, length: int) -> str:
 
 
 def _artifact(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or not path.is_file():
+        raise ContractError(
+            f"public baseline artifact must be a regular non-symlink file: {path}"
+        )
     try:
         payload = path.read_bytes()
     except OSError as exc:

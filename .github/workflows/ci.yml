@@ -37,14 +37,17 @@ jobs:
       - name: Install locked development environment
         run: uv sync --frozen --extra dev
 
-      - name: Check critical Python errors
-        run: uv run --frozen --with ruff==0.12.11 ruff check --select=E9,F63,F7,F82 src tests
+      - name: Lint Python sources and runners
+        run: uv run --frozen --with ruff==0.12.11 ruff check src tests benchmarks scripts
+
+      - name: Enforce runtime dependency boundaries
+        run: uv run --frozen python scripts/check_dependency_boundaries.py
 
       - name: Run unit tests
         run: uv run --frozen pytest -q
 
       - name: Compile Python sources
-        run: uv run --frozen python -m compileall -q src tests
+        run: uv run --frozen python -m compileall -q src tests benchmarks scripts
 
       - name: Validate public contracts and manifests
         shell: bash
@@ -53,7 +56,8 @@ jobs:
           while IFS= read -r document; do
             uv run --frozen umaq validate "$document"
           done < <(
-            find benchmarks/contracts models/estimates models/inventories models/manifests \
+            find benchmarks/budgets benchmarks/contracts benchmarks/policies benchmarks/traces \
+              models/estimates models/inventories models/manifests \
               -type f \( -name '*.json' -o -name '*.yaml' -o -name '*.yml' \) \
               -print | LC_ALL=C sort
           )

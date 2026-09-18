@@ -197,7 +197,9 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "minimum_coverage_passed",
+        "required_paths_passed",
+        "required_touch_chains_passed",
+        "required_contention_passed",
         "steady_state_stability_passed",
         "workload_cgroup_swap_disabled_passed",
         "no_swap_activity_passed",
@@ -205,7 +207,9 @@
         "overall_passed"
       ],
       "properties": {
-        "minimum_coverage_passed": { "type": "boolean" },
+        "required_paths_passed": { "type": "boolean" },
+        "required_touch_chains_passed": { "type": "boolean" },
+        "required_contention_passed": { "type": "boolean" },
         "steady_state_stability_passed": { "type": "boolean" },
         "workload_cgroup_swap_disabled_passed": { "type": "boolean" },
         "no_swap_activity_passed": { "type": "boolean" },

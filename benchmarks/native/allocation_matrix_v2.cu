@@ -324,7 +324,16 @@ __global__ void read_kernel(const float* source, std::size_t count, float* sink)
   for (std::size_t position = index; position < count; position += stride) {
     sum += source[position];
   }
-  atomicAdd(sink, sum);
+  __shared__ float reduction[kThreads];
+  reduction[threadIdx.x] = sum;
+  __syncthreads();
+  for (int offset = kThreads / 2; offset > 0; offset >>= 1) {
+    if (threadIdx.x < offset) {
+      reduction[threadIdx.x] += reduction[threadIdx.x + offset];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) sink[blockIdx.x] = reduction[0];
 }
 
 template <typename Launch>
@@ -564,9 +573,13 @@ CaseResult measure_case(
 
   float* sink = nullptr;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (!check(hipMalloc(reinterpret_cast<void**>(&sink), sizeof(float)), "hipMalloc(sink)")) {
+  if (!check(hipMalloc(reinterpret_cast<void**>(&sink),
+                       static_cast<std::size_t>(blocks) * sizeof(float)),
+             "hipMalloc(sink)")) {
 #else
-  if (!check(cudaMalloc(reinterpret_cast<void**>(&sink), sizeof(float)), "cudaMalloc(sink)")) {
+  if (!check(cudaMalloc(reinterpret_cast<void**>(&sink),
+                        static_cast<std::size_t>(blocks) * sizeof(float)),
+             "cudaMalloc(sink)")) {
 #endif
     result.reason = "sink_allocation_failed";
     allocation->release(allocation);

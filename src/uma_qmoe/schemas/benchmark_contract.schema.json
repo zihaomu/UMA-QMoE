@@ -51,20 +51,18 @@
           "id",
           "accelerator_architecture",
           "backend",
-          "container_image",
-          "runtime_source_commit",
-          "runtime_source_ref"
+          "host_toolchain",
+          "external_baselines"
         ],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
           "accelerator_architecture": { "type": "string", "minLength": 1 },
           "backend": { "enum": ["cuda", "hip"] },
-          "container_image": {
-            "type": "string",
-            "pattern": "^.+@sha256:[0-9a-f]{64}$"
-          },
-          "runtime_source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-          "runtime_source_ref": { "type": "string", "minLength": 1 }
+          "host_toolchain": { "$ref": "#/$defs/hostToolchain" },
+          "external_baselines": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/externalBaseline" }
+          }
         }
       }
     },
@@ -205,6 +203,57 @@
     }
   },
   "$defs": {
+    "hostToolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "container_image",
+        "framework",
+        "torch_version",
+        "transformers_version",
+        "backend_version"
+      ],
+      "properties": {
+        "container_image": {
+          "type": "string",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "framework": { "const": "pytorch_transformers" },
+        "torch_version": { "type": "string", "minLength": 1 },
+        "transformers_version": { "type": "string", "minLength": 1 },
+        "backend_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "externalBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "implementation",
+        "container_image",
+        "source_commit",
+        "source_ref",
+        "status"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+        "implementation": { "type": "string", "minLength": 1 },
+        "container_image": {
+          "type": "string",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["active", "optional", "blocked"] },
+        "blocking_reason": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "blocked" } } },
+          "then": { "required": ["blocking_reason"] }
+        }
+      ]
+    },
     "fileReference": {
       "type": "object",
       "additionalProperties": false,

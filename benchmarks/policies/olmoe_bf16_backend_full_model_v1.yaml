@@ -1,0 +1,25 @@
+schema_version: 1
+kind: reference_oracle_policy
+policy_id: olmoe_bf16_backend_full_model_v1
+status: frozen
+model_id: allenai/OLMoE-1B-7B-0125
+model_revision: 9b0c1aa87e34a20052389dce1f0cf01da783f654
+scope:
+  level: full_model
+  layer_index: null
+  expert_index: null
+calibration:
+  reference_target: halo3-gfx1151-hip
+  candidate_target: spark1-sm121-cuda
+  evidence_semantic_sha256: 49bb9667d976a52cd52ea7b2d2e54df56112e72b91e01cafd906c9686c1c1c3f
+  margin_rule: Rounded conservative envelope above the measured BF16 backend drift.
+policy:
+  status: frozen
+  percentile_method: nearest_rank
+  relative_error_epsilon: 1.0e-12
+  max_absolute_error: 0.5
+  max_relative_error: 2500.0
+  max_p99_absolute_error: 0.2
+  max_p99_relative_error: 0.75
+  min_cosine_similarity: 0.9998
+  min_router_top_k_set_agreement: 0.98

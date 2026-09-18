@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/expert_pack_manifest.schema.json",
+  "title": "UMA-QMoE ExpertPack Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "status", "artifact", "header_sha256", "payload_sha256", "payload_offset", "payload_length", "header"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "expert_pack_manifest" },
+    "status": { "const": "verified" },
+    "artifact": { "$ref": "#/$defs/artifact" },
+    "header_sha256": { "$ref": "#/$defs/sha256" },
+    "payload_sha256": { "$ref": "#/$defs/sha256" },
+    "payload_offset": { "type": "integer", "minimum": 4096 },
+    "payload_length": { "type": "integer", "minimum": 1 },
+    "header": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "format", "quantization", "model", "tensor_alignment_bytes", "tensor_count", "tensors"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "format": { "const": "canonical_q4_symmetric_grouped" },
+        "quantization": { "$ref": "#/$defs/quantization" },
+        "model": { "$ref": "#/$defs/model" },
+        "tensor_alignment_bytes": { "type": "integer", "minimum": 1 },
+        "tensor_count": { "type": "integer", "minimum": 1 },
+        "tensors": {
+          "type": "array", "minItems": 1,
+          "items": { "$ref": "#/$defs/tensor" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "quantization": {
+      "type": "object", "additionalProperties": false,
+      "required": ["bits", "signed_range", "group_size", "scale_dtype", "rounding", "zero_point", "nibble_order"],
+      "properties": {
+        "bits": { "const": 4 },
+        "signed_range": { "const": [-7, 7] },
+        "group_size": { "const": 128 },
+        "scale_dtype": { "const": "float32_le" },
+        "rounding": { "const": "nearest_even" },
+        "zero_point": { "type": "null" },
+        "nibble_order": { "const": "low_first_twos_complement" }
+      }
+    },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision", "model_manifest_sha256", "model_identity_sha256"],
+      "properties": {
+        "model_id": { "type": "string", "minLength": 1 },
+        "model_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "model_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "model_identity_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "tensor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "shape", "element_count", "group_count", "packed_offset", "packed_bytes", "scale_offset", "scale_bytes", "storage_end_offset", "effective_bits_per_weight", "tensor_payload_sha256"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "shape": {
+          "type": "array", "minItems": 1, "maxItems": 8,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "element_count": { "type": "integer", "minimum": 1 },
+        "group_count": { "type": "integer", "minimum": 1 },
+        "packed_offset": { "type": "integer", "minimum": 0 },
+        "packed_bytes": { "type": "integer", "minimum": 1 },
+        "scale_offset": { "type": "integer", "minimum": 1 },
+        "scale_bytes": { "type": "integer", "minimum": 4 },
+        "storage_end_offset": { "type": "integer", "minimum": 1 },
+        "effective_bits_per_weight": { "type": "number", "minimum": 4 },
+        "tensor_payload_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}
