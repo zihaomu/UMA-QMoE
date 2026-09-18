@@ -10,6 +10,23 @@ Safe UMA, acquisition, tensor-inventory, derivation, Oracle-smoke, memory-
 bandwidth, allocation-matrix, native-stream, and run contracts before kernel
 performance claims begin.
 
+## Runtime boundary
+
+UMA-QMoE does not embed vLLM. The core path is a fixed PyTorch/Hugging Face
+model host that loads dense BF16 tensors, maps one Q4 ExpertPack, and invokes
+the project-owned `uma_qmoe::moe_forward` operator. vLLM remains an isolated
+external comparison under `benchmarks/external/vllm/`; CI rejects imports in
+either direction between that external runner and the core runtime.
+
+The operator includes the CPU correctness implementation, guarded SM121/gfx1151
+dispatch, and a target-compiled W4A16 backend that reads canonical packed Q4
+bytes and FP32 group-128 scales directly. Call
+`uma_qmoe.native_backend.install_packed_q4_backend()` before selecting
+performance mode. Performance mode still fails closed when the backend is not
+explicitly installed, so benchmark runs cannot silently fall back to the
+correctness implementation. The first native backend is a correctness-first
+microkernel baseline; its single-layer timing is not an end-to-end TPS claim.
+
 ## Bootstrap development
 
 The Python control plane uses [uv](https://docs.astral.sh/uv/):

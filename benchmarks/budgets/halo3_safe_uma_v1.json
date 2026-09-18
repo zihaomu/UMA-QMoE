@@ -1,0 +1,19 @@
+{
+  "cgroup_memory_max_bytes": 103079215104,
+  "decision_record": "Freeze model/artifact budget at 32 GiB. The 96 GiB cgroup cap already leaves host OS headroom outside the workload. Reserve 16 GiB runtime, 12 GiB KV, 12 GiB workspace, and 24 GiB safety. Higher 48/64 GiB pressure remains diagnostic only.",
+  "kind": "safe_uma_budget",
+  "kv_budget_bytes": 12884901888,
+  "mem_total_bytes": 132569948160,
+  "os_daemon_reserve_bytes": 0,
+  "physical_limit_bytes": 103079215104,
+  "policy_provenance": "96 GiB no-swap cgroup; AllocationMatrixV2 safe-boundary semantic fcfb1c6a13c49d9dab3870738f7b3610305c381749f1114d2eb7bf7a0eee8b90; 16 GiB per buffer/32 GiB simultaneous working set; 5 warmups, 10 samples, CV <=10%, no swap/OOM",
+  "runtime_reserve_bytes": 17179869184,
+  "safe_budget_bytes": 34359738368,
+  "safety_margin_bytes": 25769803776,
+  "schema_version": 1,
+  "source_snapshot_sha256": "433f1c170091ae904700eb82545aae1e1063a660aef4a296e31d62e3ee6f49c2",
+  "status": "frozen",
+  "target_id": "halo3",
+  "total_reserved_bytes": 68719476736,
+  "workspace_budget_bytes": 12884901888
+}

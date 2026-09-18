@@ -162,6 +162,7 @@ def test_required_quality_gate_requires_threshold_and_evidence() -> None:
     no_trace = _contract_ready_for_frozen_gate_tests()
     gate = no_trace["quality_gates"][2]
     gate["applicability"] = "required"
+    gate.pop("trace_reference", None)
     with pytest.raises(ContractError, match="pinned trace reference"):
         validate_document(no_trace, require_frozen=True)
 
@@ -340,6 +341,12 @@ def test_run_manifest_rejects_secret_like_environment_names() -> None:
     }
 
     with pytest.raises(ContractError, match="secret-like"):
+        validate_document(run)
+
+    run["command"]["environment_allowlist"] = {}
+    artifact = {"path": "result.json", "sha256": "5" * 64, "size_bytes": 1}
+    run["raw_artifacts"] = [artifact, copy.deepcopy(artifact)]
+    with pytest.raises(ContractError, match="duplicate paths"):
         validate_document(run)
 
 

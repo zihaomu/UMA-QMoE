@@ -17,7 +17,6 @@ import math
 from pathlib import Path
 import re
 import shutil
-import statistics
 import subprocess
 import tempfile
 from typing import Any, Literal, Mapping, Sequence
@@ -506,12 +505,57 @@ def _system_activity(
 
 
 def _coverage_and_stability(
-    pressure_points: Sequence[Mapping[str, Any]], maximum_cv: float
-) -> tuple[bool, bool]:
-    coverage = all(
-        any(case["status"] == "measured" for case in point["cases"])
-        for point in pressure_points
-    )
+    pressure_points: Sequence[Mapping[str, Any]],
+    capabilities: Mapping[str, int],
+    maximum_cv: float,
+) -> tuple[bool, bool, bool, bool]:
+    required_paths = {"platform_vmm"}
+    if capabilities["managed_memory"] == 1:
+        required_paths.add("managed_unified")
+    if (
+        capabilities["pageable_memory_access"] == 1
+        and capabilities["pageable_memory_access_uses_host_page_tables"] == 1
+    ):
+        required_paths.add("system_pageable_direct")
+    required_contention = set()
+    if (
+        "managed_unified" in required_paths
+        and capabilities["concurrent_managed_access"] == 1
+    ):
+        required_contention.add("managed_unified")
+    if "system_pageable_direct" in required_paths:
+        required_contention.add("system_pageable_direct")
+
+    paths_passed = True
+    touches_passed = True
+    contention_passed = True
+    for point in pressure_points:
+        cases = {case["id"]: case for case in point["cases"]}
+        paths_passed = paths_passed and all(
+            cases[case_id]["status"] == "measured" for case_id in required_paths
+        )
+        for case_id in required_paths:
+            case = cases[case_id]
+            if case["status"] != "measured":
+                touches_passed = False
+                continue
+            touches = {touch["id"]: touch for touch in case["touches"]}
+            if touches["gpu_first"]["status"] != "measured":
+                touches_passed = False
+            if case_id != "platform_vmm" and not all(
+                touch["status"] == "measured"
+                and touch["following_access"]["status"] == "measured"
+                for touch in touches.values()
+            ):
+                touches_passed = False
+        for case_id in required_contention:
+            case = cases[case_id]
+            if (
+                case["status"] != "measured"
+                or case["contention"]["status"] != "measured"
+            ):
+                contention_passed = False
+
     measured_operations = [
         operation
         for point in pressure_points
@@ -523,7 +567,7 @@ def _coverage_and_stability(
         operation["coefficient_of_variation"] <= maximum_cv
         for operation in measured_operations
     )
-    return coverage, stability
+    return paths_passed, touches_passed, contention_passed, stability
 
 
 def _allocation_compile_command(
@@ -702,11 +746,20 @@ def benchmark_allocation_matrix_v2(
     system_activity, memory_gates = _system_activity(
         vmstat_before, vmstat_after, cgroup_before, cgroup_after
     )
-    coverage_passed, stability_passed = _coverage_and_stability(
-        pressure_points, float(maximum_coefficient_of_variation)
+    (
+        paths_passed,
+        touches_passed,
+        contention_passed,
+        stability_passed,
+    ) = _coverage_and_stability(
+        pressure_points,
+        runtime["capabilities"],
+        float(maximum_coefficient_of_variation),
     )
     gates = {
-        "minimum_coverage_passed": coverage_passed,
+        "required_paths_passed": paths_passed,
+        "required_touch_chains_passed": touches_passed,
+        "required_contention_passed": contention_passed,
         "steady_state_stability_passed": stability_passed,
         **memory_gates,
     }
@@ -918,12 +971,17 @@ def validate_allocation_matrix_v2_document(document: Mapping[str, Any]) -> None:
     }
     if cgroup["memory_events_delta"] != expected_event_deltas:
         raise ContractError("workload cgroup event deltas are invalid")
-    coverage, stability = _coverage_and_stability(
+    paths_passed, touches_passed, contention_passed, stability = (
+        _coverage_and_stability(
         points,
+        capabilities,
         document["configuration"]["maximum_coefficient_of_variation"],
+        )
     )
     expected_gates = {
-        "minimum_coverage_passed": coverage,
+        "required_paths_passed": paths_passed,
+        "required_touch_chains_passed": touches_passed,
+        "required_contention_passed": contention_passed,
         "steady_state_stability_passed": stability,
         "workload_cgroup_swap_disabled_passed": cgroup["swap_max_bytes"] == 0,
         "no_swap_activity_passed": (

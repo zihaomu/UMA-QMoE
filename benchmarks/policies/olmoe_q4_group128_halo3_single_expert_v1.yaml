@@ -1,0 +1,22 @@
+schema_version: 1
+kind: reference_oracle_policy
+policy_id: olmoe_q4_group128_halo3_single_expert_v1
+status: frozen
+model_id: allenai/OLMoE-1B-7B-0125
+model_revision: 9b0c1aa87e34a20052389dce1f0cf01da783f654
+scope: {level: single_expert, layer_index: 2, expert_index: 7}
+calibration:
+  reference_target: halo3-gfx1151-bf16
+  candidate_target: halo3-gfx1151-q4-group128
+  evidence_semantic_sha256: 1ce1390beae1c3f4bdec459886de6fbddd39ab2abbbbea558c0443b4d676c53e
+  margin_rule: Rounded envelope above measured Q4 group-128 error with epsilon 1e-4.
+policy:
+  status: frozen
+  percentile_method: nearest_rank
+  relative_error_epsilon: 0.0001
+  max_absolute_error: 0.05
+  max_relative_error: 300.0
+  max_p99_absolute_error: 0.03
+  max_p99_relative_error: 15.0
+  min_cosine_similarity: 0.975
+  min_router_top_k_set_agreement: null

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run a reproducible local vLLM serving baseline without network access."""
+"""Run the isolated external vLLM baseline without network access."""
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,10 @@ import time
 from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
+
+
+MODEL_ID = "allenai/OLMoE-1B-7B-0125"
+MODEL_REVISION = "9b0c1aa87e34a20052389dce1f0cf01da783f654"
 
 
 def _utc_now() -> str:
@@ -49,14 +54,11 @@ def _memory_available() -> int | None:
 
 
 def _telemetry() -> dict[str, Any] | None:
-    try:
-        from uma_qmoe.telemetry import TelemetryProbe
-
-        return TelemetryProbe.detect().capture(
-            operation_id="public_baseline", sample_index=0, boundary="before"
-        )
-    except Exception:
-        return None
+    # This runner is an external implementation boundary.  Importing the
+    # UMA-QMoE runtime here would make the baseline depend on the system under
+    # test, so target telemetry is deliberately left unavailable until an
+    # implementation-neutral sidecar collector is provided.
+    return None
 
 
 class _Sampler:
@@ -115,6 +117,10 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-id", required=True)
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--implementation-version", required=True)
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--backend", choices=("cuda", "hip"), required=True)
+    parser.add_argument("--container-image", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--input-len", type=int, default=2048)
     parser.add_argument("--output-len", type=int, default=256)
@@ -140,6 +146,22 @@ def main() -> int:
         raise SystemExit("warmups, prompts, and concurrency are below the evidence floor")
     if not 0 < args.gpu_memory_utilization < 1:
         raise SystemExit("gpu-memory-utilization must be within (0, 1)")
+    try:
+        observed_vllm_version = version("vllm")
+    except PackageNotFoundError as exc:
+        raise SystemExit("vLLM distribution metadata is unavailable") from exc
+    if observed_vllm_version != args.implementation_version:
+        raise SystemExit(
+            "vLLM version mismatch: "
+            f"requested {args.implementation_version}, observed {observed_vllm_version}"
+        )
+    import torch
+
+    observed_backend = "hip" if torch.version.hip else "cuda"
+    if observed_backend != args.backend:
+        raise SystemExit(
+            f"vLLM backend mismatch: requested {args.backend}, observed {observed_backend}"
+        )
 
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -287,6 +309,7 @@ def main() -> int:
         "kind": "vllm_public_baseline_runner_metadata",
         "target_id": args.target_id,
         "status": "succeeded" if failure is None else "failed",
+        "returncode": 0 if failure is None else 1,
         "started_at": started_at,
         "completed_at": _utc_now(),
         "server_ready_seconds": ready_seconds,
@@ -295,6 +318,36 @@ def main() -> int:
         "runner_argv": [sys.executable, *sys.argv],
         "benchmark_returncode": benchmark_returncode,
         "failure": failure,
+        "artifact_paths": [
+            "vllm-result.json",
+            "runner-metadata.json",
+            "server.log",
+            "benchmark.log",
+        ],
+        "isolation": {
+            "execution_boundary": "separate_container",
+            "imports_uma_qmoe_runtime": False,
+            "loads_uma_qmoe_expert_pack": False,
+        },
+        "model": {
+            "model_id": MODEL_ID,
+            "model_revision": MODEL_REVISION,
+            "path": str(args.model.resolve()),
+        },
+        "workload": {
+            "input_tokens": args.input_len,
+            "output_tokens": args.output_len,
+            "warmup_requests": args.num_warmups,
+            "measured_requests": args.num_prompts,
+            "max_concurrency": args.max_concurrency,
+        },
+        "runtime": {
+            "implementation_name": "vllm",
+            "implementation_version": observed_vllm_version,
+            "source_commit": args.source_commit,
+            "backend": observed_backend,
+            "container_image": args.container_image,
+        },
         "cgroup_memory_peak_bytes": max(memory_values) if memory_values else None,
         "samples": sampler.samples,
     }

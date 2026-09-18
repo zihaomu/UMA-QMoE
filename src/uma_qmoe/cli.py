@@ -346,6 +346,111 @@ def _build_parser() -> argparse.ArgumentParser:
     baseline_run_parser.add_argument("--model-manifest-sha256", required=True)
     baseline_run_parser.add_argument("--output", default="-")
 
+    external_baseline_parser = subparsers.add_parser(
+        "normalize-external-baseline",
+        help="normalize an isolated third-party run into ExternalBaseline v1",
+    )
+    external_baseline_parser.add_argument("run_directory", type=Path)
+    external_baseline_parser.add_argument("--target-id", required=True)
+    external_baseline_parser.add_argument("--implementation-name", required=True)
+    external_baseline_parser.add_argument("--implementation-version", required=True)
+    external_baseline_parser.add_argument("--source-commit", required=True)
+    external_baseline_parser.add_argument(
+        "--backend", choices=("cuda", "hip", "cpu"), required=True
+    )
+    external_baseline_parser.add_argument("--container-image", required=True)
+    external_baseline_parser.add_argument("--model-id", required=True)
+    external_baseline_parser.add_argument("--model-revision", required=True)
+    external_baseline_parser.add_argument(
+        "--derivation-semantic-sha256", required=True
+    )
+    external_baseline_parser.add_argument("--input-tokens", type=int, required=True)
+    external_baseline_parser.add_argument("--output-tokens", type=int, required=True)
+    external_baseline_parser.add_argument(
+        "--warmup-requests", type=int, required=True
+    )
+    external_baseline_parser.add_argument(
+        "--measured-requests", type=int, required=True
+    )
+    external_baseline_parser.add_argument(
+        "--max-concurrency", type=int, required=True
+    )
+    external_baseline_parser.add_argument("--output", default="-")
+
+    external_run_parser = subparsers.add_parser(
+        "build-external-baseline-run-manifest",
+        help="bind ExternalBaseline evidence and raw files into RunManifest v1",
+    )
+    external_run_parser.add_argument("baseline", type=Path)
+    external_run_parser.add_argument("run_directory", type=Path)
+    external_run_parser.add_argument("--run-id", required=True)
+    external_run_parser.add_argument("--git-commit", required=True)
+    external_run_parser.add_argument("--git-dirty", action="store_true")
+    external_run_parser.add_argument("--dirty-patch-sha256")
+    external_run_parser.add_argument("--machine-baseline-sha256", required=True)
+    external_run_parser.add_argument("--benchmark-contract-sha256", required=True)
+    external_run_parser.add_argument("--model-manifest-sha256", required=True)
+    external_run_parser.add_argument("--output", default="-")
+
+    reference_host_parser = subparsers.add_parser(
+        "normalize-reference-host-baseline",
+        help="normalize the fixed offline PyTorch/HF host baseline",
+    )
+    reference_host_parser.add_argument("run_directory", type=Path)
+    reference_host_parser.add_argument("--target-id", required=True)
+    reference_host_parser.add_argument("--source-commit", required=True)
+    reference_host_parser.add_argument(
+        "--backend", choices=("cuda", "hip"), required=True
+    )
+    reference_host_parser.add_argument("--container-image", required=True)
+    reference_host_parser.add_argument("--model-id", required=True)
+    reference_host_parser.add_argument("--model-revision", required=True)
+    reference_host_parser.add_argument(
+        "--derivation-semantic-sha256", required=True
+    )
+    reference_host_parser.add_argument("--input-tokens", type=int, required=True)
+    reference_host_parser.add_argument("--output-tokens", type=int, required=True)
+    reference_host_parser.add_argument("--warmup-requests", type=int, required=True)
+    reference_host_parser.add_argument("--measured-requests", type=int, required=True)
+    reference_host_parser.add_argument("--output", default="-")
+
+    reference_host_run_parser = subparsers.add_parser(
+        "build-reference-host-run-manifest",
+        help="bind ReferenceHostBaseline evidence and raw files into RunManifest v1",
+    )
+    reference_host_run_parser.add_argument("baseline", type=Path)
+    reference_host_run_parser.add_argument("run_directory", type=Path)
+    reference_host_run_parser.add_argument("--run-id", required=True)
+    reference_host_run_parser.add_argument("--git-commit", required=True)
+    reference_host_run_parser.add_argument("--git-dirty", action="store_true")
+    reference_host_run_parser.add_argument("--dirty-patch-sha256")
+    reference_host_run_parser.add_argument("--machine-baseline-sha256", required=True)
+    reference_host_run_parser.add_argument("--benchmark-contract-sha256", required=True)
+    reference_host_run_parser.add_argument("--model-manifest-sha256", required=True)
+    reference_host_run_parser.add_argument("--output", default="-")
+
+    route_trace_parser = subparsers.add_parser(
+        "build-route-trace",
+        help="normalize a fixed OLMoE capture into frozen RouteTrace v1",
+    )
+    route_trace_parser.add_argument("capture", type=Path)
+    route_trace_parser.add_argument("--trace-id", required=True)
+    route_trace_parser.add_argument("--output", default="-")
+
+    replay_trace_parser = subparsers.add_parser(
+        "replay-route-trace",
+        help="validate and fully traverse a RouteTrace in replay order",
+    )
+    replay_trace_parser.add_argument("trace", type=Path)
+    replay_trace_parser.add_argument("--output", default="-")
+
+    inspect_pack_parser = subparsers.add_parser(
+        "inspect-expert-pack",
+        help="verify every ExpertPack header, identity, layout, and payload hash",
+    )
+    inspect_pack_parser.add_argument("pack", type=Path)
+    inspect_pack_parser.add_argument("--output", default="-")
+
     inventory_parser = subparsers.add_parser(
         "inventory-safetensors",
         help="stream-verify local Safetensors shards and hash every tensor payload",
@@ -571,11 +676,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.command == "compare-reference-oracle":
             from .reference_oracle import build_reference_oracle_comparison
 
-            quality_policy = (
-                load_document(arguments.quality_policy)
-                if arguments.quality_policy is not None
-                else None
-            )
+            quality_policy = None
+            if arguments.quality_policy is not None:
+                policy_document = load_document(arguments.quality_policy)
+                if policy_document.get("kind") == "reference_oracle_policy":
+                    validate_document(policy_document)
+                    requested_scope = {
+                        "level": arguments.level,
+                        "layer_index": arguments.layer_index,
+                        "expert_index": arguments.expert_index,
+                    }
+                    if policy_document["scope"] != requested_scope:
+                        raise ContractError(
+                            "ReferenceOraclePolicy scope does not match comparison"
+                        )
+                    if policy_document["model_revision"] != arguments.model_revision:
+                        raise ContractError(
+                            "ReferenceOraclePolicy model revision does not match comparison"
+                        )
+                    quality_policy = policy_document["policy"]
+                else:
+                    quality_policy = policy_document
             document = build_reference_oracle_comparison(
                 arguments.reference_stream,
                 arguments.candidate_stream,
@@ -786,6 +907,101 @@ def main(argv: Sequence[str] | None = None) -> int:
                 benchmark_contract_sha256=arguments.benchmark_contract_sha256,
                 model_manifest_sha256=arguments.model_manifest_sha256,
             )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "normalize-external-baseline":
+            from .external_baseline import build_external_baseline
+
+            document = build_external_baseline(
+                arguments.run_directory,
+                target_id=arguments.target_id,
+                implementation_name=arguments.implementation_name,
+                implementation_version=arguments.implementation_version,
+                source_commit=arguments.source_commit,
+                backend=arguments.backend,
+                container_image=arguments.container_image,
+                model_id=arguments.model_id,
+                model_revision=arguments.model_revision,
+                derivation_semantic_sha256=arguments.derivation_semantic_sha256,
+                input_tokens=arguments.input_tokens,
+                output_tokens=arguments.output_tokens,
+                warmup_requests=arguments.warmup_requests,
+                measured_requests=arguments.measured_requests,
+                max_concurrency=arguments.max_concurrency,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-external-baseline-run-manifest":
+            from .external_baseline import build_external_baseline_run_manifest
+
+            document = build_external_baseline_run_manifest(
+                arguments.baseline,
+                arguments.run_directory,
+                run_id=arguments.run_id,
+                git_commit=arguments.git_commit,
+                git_dirty=arguments.git_dirty,
+                dirty_patch_sha256=arguments.dirty_patch_sha256,
+                machine_baseline_sha256=arguments.machine_baseline_sha256,
+                benchmark_contract_sha256=arguments.benchmark_contract_sha256,
+                model_manifest_sha256=arguments.model_manifest_sha256,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "normalize-reference-host-baseline":
+            from .reference_host_baseline import build_reference_host_baseline
+
+            document = build_reference_host_baseline(
+                arguments.run_directory,
+                target_id=arguments.target_id,
+                source_commit=arguments.source_commit,
+                backend=arguments.backend,
+                container_image=arguments.container_image,
+                model_id=arguments.model_id,
+                model_revision=arguments.model_revision,
+                derivation_semantic_sha256=arguments.derivation_semantic_sha256,
+                input_tokens=arguments.input_tokens,
+                output_tokens=arguments.output_tokens,
+                warmup_requests=arguments.warmup_requests,
+                measured_requests=arguments.measured_requests,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-reference-host-run-manifest":
+            from .reference_host_baseline import build_reference_host_run_manifest
+
+            document = build_reference_host_run_manifest(
+                arguments.baseline,
+                arguments.run_directory,
+                run_id=arguments.run_id,
+                git_commit=arguments.git_commit,
+                git_dirty=arguments.git_dirty,
+                dirty_patch_sha256=arguments.dirty_patch_sha256,
+                machine_baseline_sha256=arguments.machine_baseline_sha256,
+                benchmark_contract_sha256=arguments.benchmark_contract_sha256,
+                model_manifest_sha256=arguments.model_manifest_sha256,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-route-trace":
+            from .route_trace import build_route_trace
+
+            document = build_route_trace(
+                arguments.capture,
+                trace_id=arguments.trace_id,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "replay-route-trace":
+            from .route_trace import build_replay_summary
+
+            trace = validate_file(arguments.trace, require_frozen=True)
+            document = build_replay_summary(trace)
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "inspect-expert-pack":
+            from .expert_pack import inspect_expert_pack
+
+            document = inspect_expert_pack(arguments.pack)
             _write_document(document, arguments.output)
             return 0
         if arguments.command == "inventory-safetensors":

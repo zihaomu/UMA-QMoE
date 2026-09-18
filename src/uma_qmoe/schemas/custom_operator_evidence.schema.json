@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/custom_operator_evidence.schema.json",
+  "title": "UMA-QMoE Custom Operator Evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "operator", "reference", "performance_mode", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "custom_operator_evidence" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "enum": ["halo3", "spark1"] },
+    "status": { "enum": ["passed", "failed"] },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "model_revision", "expert_pack_sha256"],
+      "properties": {
+        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" },
+        "expert_pack_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["qualified_name", "registration", "registered", "platform", "device_name"],
+      "properties": {
+        "qualified_name": { "const": "uma_qmoe::moe_forward" },
+        "registration": { "const": "torch.library" },
+        "registered": { "type": "boolean" },
+        "platform": { "enum": ["cuda_sm121", "hip_gfx1151"] },
+        "device_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer_index", "input_shape", "routes_shape", "unique_experts", "cpu_finite", "target_finite", "cpu_output_sha256", "target_output_sha256", "max_abs_error", "cosine_similarity", "acceptance"],
+      "properties": {
+        "layer_index": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "input_shape": { "const": [1, 2048] },
+        "routes_shape": { "const": [1, 8] },
+        "unique_experts": { "const": 1 },
+        "cpu_finite": { "type": "boolean" },
+        "target_finite": { "type": "boolean" },
+        "cpu_output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "target_output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "max_abs_error": { "type": "number", "minimum": 0 },
+        "cosine_similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+        "acceptance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_abs_error", "minimum_cosine_similarity"],
+          "properties": {
+            "max_abs_error": { "const": 1.0 },
+            "minimum_cosine_similarity": { "const": 0.99 }
+          }
+        }
+      }
+    },
+    "performance_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "backend_registered", "rejected", "error"],
+      "properties": {
+        "requested": { "const": true },
+        "backend_registered": { "const": false },
+        "rejected": { "type": "boolean" },
+        "error": { "type": "string", "minLength": 1 }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operator_registered", "architecture_dispatch", "cpu_reference_forward", "target_reference_forward", "cpu_target_agreement", "performance_mode_fail_closed", "overall_passed"],
+      "properties": {
+        "operator_registered": { "type": "boolean" },
+        "architecture_dispatch": { "type": "boolean" },
+        "cpu_reference_forward": { "type": "boolean" },
+        "target_reference_forward": { "type": "boolean" },
+        "cpu_target_agreement": { "type": "boolean" },
+        "performance_mode_fail_closed": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  }
+}
