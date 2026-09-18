@@ -64,6 +64,7 @@ class _Sampler:
         self.interval_seconds = interval_seconds
         self.samples: list[dict[str, Any]] = []
         self._stop = threading.Event()
+        self._accelerator_telemetry = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> None:
@@ -72,6 +73,9 @@ class _Sampler:
     def stop(self) -> None:
         self._stop.set()
         self._thread.join(timeout=max(5.0, self.interval_seconds + 1.0))
+
+    def enable_accelerator_telemetry(self) -> None:
+        self._accelerator_telemetry.set()
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -82,7 +86,11 @@ class _Sampler:
                         Path("/sys/fs/cgroup/memory.current")
                     ),
                     "memory_available_bytes": _memory_available(),
-                    "telemetry": _telemetry(),
+                    "telemetry": (
+                        _telemetry()
+                        if self._accelerator_telemetry.is_set()
+                        else None
+                    ),
                 }
             )
             self._stop.wait(self.interval_seconds)
@@ -191,7 +199,7 @@ def main() -> int:
         "--random-output-len",
         str(args.output_len),
         "--random-range-ratio",
-        "1.0",
+        "0.0",
         "--num-warmups",
         str(args.num_warmups),
         "--num-prompts",
@@ -237,6 +245,11 @@ def main() -> int:
                 server,
                 args.ready_timeout_seconds,
             )
+            # On ROCm, invoking amd-smi concurrently with vLLM's platform
+            # discovery can make device detection fail. Memory sampling starts
+            # immediately, but management telemetry is enabled only after the
+            # server has completed device discovery and reports healthy.
+            sampler.enable_accelerator_telemetry()
             completed = subprocess.run(
                 benchmark_argv,
                 stdout=benchmark_stream,
