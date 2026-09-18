@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/allocation_matrix_v2.schema.json",
+  "title": "UMA-QMoE AllocationMatrix v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "target_id",
+    "status",
+    "source",
+    "build",
+    "runtime",
+    "configuration",
+    "measurement_scope",
+    "pressure_points",
+    "system_activity",
+    "gates"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "kind": { "const": "allocation_matrix_v2" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "enum": ["passed", "failed"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "compiler", "compiler_version", "architecture", "optimization"],
+      "properties": {
+        "backend": { "enum": ["cuda", "hip"] },
+        "compiler": { "enum": ["nvcc", "hipcc"] },
+        "compiler_version": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "architecture": { "type": "string", "pattern": "^[A-Za-z0-9_.+-]+$" },
+        "optimization": { "const": "O3" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend",
+        "device_name",
+        "total_global_memory_bytes",
+        "multiprocessor_count",
+        "threads_per_block",
+        "blocks",
+        "capabilities"
+      ],
+      "properties": {
+        "backend": { "enum": ["cuda", "hip"] },
+        "device_name": { "type": "string", "minLength": 1 },
+        "total_global_memory_bytes": { "type": "integer", "minimum": 1 },
+        "multiprocessor_count": { "type": "integer", "minimum": 1 },
+        "threads_per_block": { "type": "integer", "minimum": 1 },
+        "blocks": { "type": "integer", "minimum": 1 },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "managed_memory",
+            "concurrent_managed_access",
+            "pageable_memory_access",
+            "pageable_memory_access_uses_host_page_tables"
+          ],
+          "properties": {
+            "managed_memory": { "type": "integer", "enum": [0, 1] },
+            "concurrent_managed_access": { "type": "integer", "enum": [0, 1] },
+            "pageable_memory_access": { "type": "integer", "enum": [0, 1] },
+            "pageable_memory_access_uses_host_page_tables": { "type": "integer", "enum": [0, 1] }
+          }
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "buffer_sizes_bytes",
+        "warmup_iterations",
+        "measured_iterations",
+        "inner_iterations",
+        "maximum_coefficient_of_variation"
+      ],
+      "properties": {
+        "buffer_sizes_bytes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 4194304, "maximum": 68719476736, "multipleOf": 4 }
+        },
+        "warmup_iterations": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "measured_iterations": { "type": "integer", "minimum": 3, "maximum": 100 },
+        "inner_iterations": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "maximum_coefficient_of_variation": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "measurement_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["elapsed_time", "traffic", "counter_calibrated", "page_fault_scope", "limitations"],
+      "properties": {
+        "elapsed_time": { "const": "gpu_events_and_host_monotonic" },
+        "traffic": { "const": "algorithmic_bytes" },
+        "counter_calibrated": { "const": false },
+        "page_fault_scope": { "const": "calling_process_host_faults" },
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "pressure_points": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requested_buffer_bytes", "measured_case_count", "unavailable_case_count", "cases"],
+        "properties": {
+          "requested_buffer_bytes": { "type": "integer", "minimum": 4194304, "maximum": 68719476736, "multipleOf": 4 },
+          "measured_case_count": { "type": "integer", "minimum": 0, "maximum": 3 },
+          "unavailable_case_count": { "type": "integer", "minimum": 0, "maximum": 3 },
+          "cases": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": { "$ref": "#/$defs/allocationCase" }
+          }
+        }
+      }
+    },
+    "system_activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_vmstat", "workload_cgroup"],
+      "properties": {
+        "host_vmstat": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "swap_in_pages_before",
+            "swap_in_pages_after",
+            "swap_in_pages_delta",
+            "swap_out_pages_before",
+            "swap_out_pages_after",
+            "swap_out_pages_delta"
+          ],
+          "properties": {
+            "swap_in_pages_before": { "type": "integer", "minimum": 0 },
+            "swap_in_pages_after": { "type": "integer", "minimum": 0 },
+            "swap_in_pages_delta": { "type": "integer", "minimum": 0 },
+            "swap_out_pages_before": { "type": "integer", "minimum": 0 },
+            "swap_out_pages_after": { "type": "integer", "minimum": 0 },
+            "swap_out_pages_delta": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "workload_cgroup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "swap_current_bytes_before",
+            "swap_current_bytes_after",
+            "swap_current_bytes_delta",
+            "swap_max_bytes",
+            "memory_events_before",
+            "memory_events_after",
+            "memory_events_delta"
+          ],
+          "properties": {
+            "swap_current_bytes_before": { "type": "integer", "minimum": 0 },
+            "swap_current_bytes_after": { "type": "integer", "minimum": 0 },
+            "swap_current_bytes_delta": { "type": "integer", "minimum": 0 },
+            "swap_max_bytes": { "type": ["integer", "null"], "minimum": 0 },
+            "memory_events_before": { "$ref": "#/$defs/memoryEvents" },
+            "memory_events_after": { "$ref": "#/$defs/memoryEvents" },
+            "memory_events_delta": { "$ref": "#/$defs/memoryEvents" }
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_coverage_passed",
+        "steady_state_stability_passed",
+        "workload_cgroup_swap_disabled_passed",
+        "no_swap_activity_passed",
+        "no_oom_events_passed",
+        "overall_passed"
+      ],
+      "properties": {
+        "minimum_coverage_passed": { "type": "boolean" },
+        "steady_state_stability_passed": { "type": "boolean" },
+        "workload_cgroup_swap_disabled_passed": { "type": "boolean" },
+        "no_swap_activity_passed": { "type": "boolean" },
+        "no_oom_events_passed": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "reason": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]{2,127}$" },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["samples_seconds", "median_seconds", "mean_seconds", "coefficient_of_variation", "effective_gbps"],
+      "properties": {
+        "samples_seconds": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 100,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "median_seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "mean_seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "coefficient_of_variation": { "type": "number", "minimum": 0 },
+        "effective_gbps": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "followingAccess": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["actor", "status", "seconds"],
+          "properties": {
+            "actor": { "enum": ["cpu", "gpu"] },
+            "status": { "const": "measured" },
+            "seconds": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["actor", "status", "reason"],
+          "properties": {
+            "actor": { "enum": ["cpu", "gpu"] },
+            "status": { "const": "unavailable" },
+            "reason": { "$ref": "#/$defs/reason" }
+          }
+        }
+      ]
+    },
+    "touch": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "status", "seconds", "host_minor_faults_delta", "host_major_faults_delta", "following_access"],
+          "properties": {
+            "id": { "enum": ["cpu_first", "gpu_first"] },
+            "status": { "const": "measured" },
+            "seconds": { "type": "number", "exclusiveMinimum": 0 },
+            "host_minor_faults_delta": { "type": "integer", "minimum": 0 },
+            "host_major_faults_delta": { "type": "integer", "minimum": 0 },
+            "following_access": { "$ref": "#/$defs/followingAccess" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "status", "reason", "following_access"],
+          "properties": {
+            "id": { "enum": ["cpu_first", "gpu_first"] },
+            "status": { "const": "unavailable" },
+            "reason": { "$ref": "#/$defs/reason" },
+            "following_access": { "$ref": "#/$defs/followingAccess" }
+          }
+        }
+      ]
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "algorithmic_read_bytes",
+        "algorithmic_write_bytes",
+        "algorithmic_total_bytes",
+        "samples_seconds",
+        "median_seconds",
+        "mean_seconds",
+        "coefficient_of_variation",
+        "effective_gbps"
+      ],
+      "properties": {
+        "id": { "enum": ["read", "write", "copy"] },
+        "algorithmic_read_bytes": { "type": "integer", "minimum": 0 },
+        "algorithmic_write_bytes": { "type": "integer", "minimum": 0 },
+        "algorithmic_total_bytes": { "type": "integer", "minimum": 1 },
+        "samples_seconds": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 100,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "median_seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "mean_seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "coefficient_of_variation": { "type": "number", "minimum": 0 },
+        "effective_gbps": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "contention": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "wall", "gpu_half_buffer"],
+          "properties": {
+            "status": { "const": "measured" },
+            "wall": { "$ref": "#/$defs/summary" },
+            "gpu_half_buffer": { "$ref": "#/$defs/summary" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "const": "unavailable" },
+            "reason": { "$ref": "#/$defs/reason" }
+          }
+        }
+      ]
+    },
+    "allocationCase": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "status", "allocation_api", "access_path", "reason"],
+          "properties": {
+            "id": { "enum": ["managed_unified", "system_pageable_direct", "platform_vmm"] },
+            "status": { "const": "unavailable" },
+            "allocation_api": { "type": "string", "minLength": 1 },
+            "access_path": { "type": "string", "minLength": 1 },
+            "reason": { "$ref": "#/$defs/reason" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "status",
+            "allocation_api",
+            "access_path",
+            "buffer_bytes",
+            "allocation_seconds",
+            "touches",
+            "operations",
+            "contention"
+          ],
+          "properties": {
+            "id": { "enum": ["managed_unified", "system_pageable_direct", "platform_vmm"] },
+            "status": { "const": "measured" },
+            "allocation_api": { "type": "string", "minLength": 1 },
+            "access_path": { "type": "string", "minLength": 1 },
+            "buffer_bytes": { "type": "integer", "minimum": 4194304, "multipleOf": 4 },
+            "allocation_seconds": { "type": "number", "exclusiveMinimum": 0 },
+            "touches": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "$ref": "#/$defs/touch" }
+            },
+            "operations": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "$ref": "#/$defs/operation" }
+            },
+            "contention": { "$ref": "#/$defs/contention" }
+          }
+        }
+      ]
+    },
+    "memoryEvents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["high", "max", "oom", "oom_kill", "oom_group_kill"],
+      "properties": {
+        "high": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 0 },
+        "oom": { "type": "integer", "minimum": 0 },
+        "oom_kill": { "type": "integer", "minimum": 0 },
+        "oom_group_kill": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

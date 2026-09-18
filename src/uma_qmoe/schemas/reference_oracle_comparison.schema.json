@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/reference_oracle_comparison.schema.json",
+  "title": "UMA-QMoE ReferenceOracleComparison v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "oracle_id",
+    "status",
+    "model",
+    "scope",
+    "fixture",
+    "implementations",
+    "quality_policy",
+    "tensors",
+    "router",
+    "aggregate",
+    "evaluations"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "reference_oracle_comparison" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "oracle_id": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["measured", "passed", "failed"] },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "model_revision",
+        "model_type",
+        "num_layers",
+        "num_experts",
+        "top_k"
+      ],
+      "properties": {
+        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "model_type": { "const": "olmoe" },
+        "num_layers": { "const": 16 },
+        "num_experts": { "const": 64 },
+        "top_k": { "const": 8 }
+      }
+    },
+    "scope": { "$ref": "#/$defs/scope" },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "implementations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "candidate"],
+      "properties": {
+        "reference": { "$ref": "#/$defs/implementation" },
+        "candidate": { "$ref": "#/$defs/implementation" }
+      }
+    },
+    "quality_policy": { "$ref": "#/$defs/qualityPolicy" },
+    "tensors": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/tensorComparison" }
+    },
+    "router": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/routerAggregate" }
+      ]
+    },
+    "aggregate": { "$ref": "#/$defs/numericAggregate" },
+    "evaluations": {
+      "type": "array",
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/evaluation" }
+    }
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "layer_index", "expert_index"],
+      "properties": {
+        "level": { "enum": ["single_expert", "single_moe_layer", "full_model"] },
+        "layer_index": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "integer", "minimum": 0, "maximum": 15 }
+          ]
+        },
+        "expert_index": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "integer", "minimum": 0, "maximum": 63 }
+          ]
+        }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "precision", "artifact_sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "precision": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "qualityPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "percentile_method",
+        "relative_error_epsilon",
+        "max_absolute_error",
+        "max_relative_error",
+        "max_p99_absolute_error",
+        "max_p99_relative_error",
+        "min_cosine_similarity",
+        "min_router_top_k_set_agreement"
+      ],
+      "properties": {
+        "status": { "enum": ["draft", "frozen"] },
+        "percentile_method": { "const": "nearest_rank" },
+        "relative_error_epsilon": { "type": "number", "exclusiveMinimum": 0 },
+        "max_absolute_error": { "$ref": "#/$defs/nullableNonNegative" },
+        "max_relative_error": { "$ref": "#/$defs/nullableNonNegative" },
+        "max_p99_absolute_error": { "$ref": "#/$defs/nullableNonNegative" },
+        "max_p99_relative_error": { "$ref": "#/$defs/nullableNonNegative" },
+        "min_cosine_similarity": { "$ref": "#/$defs/nullableUnitInterval" },
+        "min_router_top_k_set_agreement": { "$ref": "#/$defs/nullableUnitInterval" }
+      }
+    },
+    "nullableNonNegative": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "number", "minimum": 0 }
+      ]
+    },
+    "nullableUnitInterval": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "number", "minimum": 0, "maximum": 1 }
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dtype", "sha256"],
+      "properties": {
+        "dtype": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "shape": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "type": "integer", "minimum": 1 }
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mean", "p50", "p95", "p99", "max"],
+      "properties": {
+        "mean": { "type": "number", "minimum": 0 },
+        "p50": { "type": "number", "minimum": 0 },
+        "p95": { "type": "number", "minimum": 0 },
+        "p99": { "type": "number", "minimum": 0 },
+        "max": { "type": "number", "minimum": 0 }
+      }
+    },
+    "tensorMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "element_count",
+        "finite",
+        "absolute_error",
+        "relative_error",
+        "cosine_similarity"
+      ],
+      "properties": {
+        "element_count": { "type": "integer", "minimum": 1 },
+        "finite": { "const": true },
+        "absolute_error": { "$ref": "#/$defs/distribution" },
+        "relative_error": { "$ref": "#/$defs/distribution" },
+        "cosine_similarity": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "tensorComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "role", "shape", "reference", "candidate", "metrics"],
+      "properties": {
+        "identity": { "type": "string", "minLength": 1 },
+        "role": {
+          "enum": ["expert_output", "router_logits", "moe_layer_output", "final_logits"]
+        },
+        "shape": { "$ref": "#/$defs/shape" },
+        "reference": { "$ref": "#/$defs/identity" },
+        "candidate": { "$ref": "#/$defs/identity" },
+        "metrics": { "$ref": "#/$defs/tensorMetrics" }
+      }
+    },
+    "routerRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "shape",
+        "top_k",
+        "reference",
+        "candidate",
+        "decision_count",
+        "exact_set_match_count",
+        "top_k_set_agreement",
+        "mean_set_overlap"
+      ],
+      "properties": {
+        "identity": { "type": "string", "minLength": 1 },
+        "shape": { "$ref": "#/$defs/shape" },
+        "top_k": { "const": 8 },
+        "reference": { "$ref": "#/$defs/identity" },
+        "candidate": { "$ref": "#/$defs/identity" },
+        "decision_count": { "type": "integer", "minimum": 1 },
+        "exact_set_match_count": { "type": "integer", "minimum": 0 },
+        "top_k_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mean_set_overlap": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "routerAggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_count",
+        "decision_count",
+        "exact_set_match_count",
+        "top_k_set_agreement",
+        "mean_set_overlap",
+        "records"
+      ],
+      "properties": {
+        "record_count": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "decision_count": { "type": "integer", "minimum": 1 },
+        "exact_set_match_count": { "type": "integer", "minimum": 0 },
+        "top_k_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mean_set_overlap": { "type": "number", "minimum": 0, "maximum": 1 },
+        "records": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/routerRecord" }
+        }
+      }
+    },
+    "numericAggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tensor_count",
+        "element_count",
+        "absolute_error",
+        "relative_error",
+        "minimum_tensor_cosine_similarity"
+      ],
+      "properties": {
+        "tensor_count": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "element_count": { "type": "integer", "minimum": 1 },
+        "absolute_error": { "$ref": "#/$defs/distribution" },
+        "relative_error": { "$ref": "#/$defs/distribution" },
+        "minimum_tensor_cosine_similarity": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "observed", "comparator", "threshold", "passed"],
+      "properties": {
+        "metric": {
+          "enum": [
+            "max_absolute_error",
+            "max_relative_error",
+            "max_p99_absolute_error",
+            "max_p99_relative_error",
+            "min_cosine_similarity",
+            "min_router_top_k_set_agreement"
+          ]
+        },
+        "observed": { "type": "number" },
+        "comparator": { "enum": ["<=", ">="] },
+        "threshold": { "type": "number", "minimum": 0 },
+        "passed": { "type": "boolean" }
+      }
+    }
+  }
+}
