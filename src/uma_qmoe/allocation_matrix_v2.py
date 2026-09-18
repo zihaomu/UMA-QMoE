@@ -543,6 +543,8 @@ def _allocation_compile_command(
     )
     thread_flag = "-Xcompiler=-pthread" if backend == "cuda" else "-pthread"
     command.insert(-2, thread_flag)
+    if backend == "cuda":
+        command.append("-lcuda")
     return command
 
 

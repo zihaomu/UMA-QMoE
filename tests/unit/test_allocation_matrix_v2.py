@@ -314,3 +314,4 @@ def test_cuda_compile_uses_nvcc_host_thread_flag(tmp_path: Path) -> None:
     )
     assert "-Xcompiler=-pthread" in command
     assert "-pthread" not in command
+    assert "-lcuda" in command

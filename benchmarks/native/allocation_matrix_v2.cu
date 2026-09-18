@@ -55,6 +55,7 @@
 #define GPU_LAUNCH(kernel, blocks, threads, ...) \
   hipLaunchKernelGGL(kernel, dim3(blocks), dim3(threads), 0, 0, __VA_ARGS__)
 #else
+#include <cuda.h>
 #include <cuda_runtime.h>
 #define GPU_BACKEND "cuda"
 #define gpuError_t cudaError_t
@@ -74,21 +75,13 @@
 #define gpuEventSynchronize cudaEventSynchronize
 #define gpuEventElapsedTime cudaEventElapsedTime
 #define gpuEventDestroy cudaEventDestroy
-#define gpuMemAddressReserve cudaMemAddressReserve
-#define gpuMemCreate cudaMemCreate
-#define gpuMemMap cudaMemMap
-#define gpuMemSetAccess cudaMemSetAccess
-#define gpuMemUnmap cudaMemUnmap
-#define gpuMemRelease cudaMemRelease
-#define gpuMemAddressFree cudaMemAddressFree
-#define gpuMemGetAllocationGranularity cudaMemGetAllocationGranularity
-#define gpuMemAllocationProp cudaMemAllocationProp
-#define gpuMemAccessDesc cudaMemAccessDesc
-#define gpuMemGenericAllocationHandle_t cudaMemGenericAllocationHandle_t
-#define gpuMemAllocationTypePinned cudaMemAllocationTypePinned
-#define gpuMemLocationTypeDevice cudaMemLocationTypeDevice
-#define gpuMemAccessFlagsProtReadWrite cudaMemAccessFlagsProtReadWrite
-#define gpuMemAllocationGranularityMinimum cudaMemAllocationGranularityMinimum
+#define gpuMemAllocationProp CUmemAllocationProp
+#define gpuMemAccessDesc CUmemAccessDesc
+#define gpuMemGenericAllocationHandle_t CUmemGenericAllocationHandle
+#define gpuMemAllocationTypePinned CU_MEM_ALLOCATION_TYPE_PINNED
+#define gpuMemLocationTypeDevice CU_MEM_LOCATION_TYPE_DEVICE
+#define gpuMemAccessFlagsProtReadWrite CU_MEM_ACCESS_FLAGS_PROT_READWRITE
+#define gpuMemAllocationGranularityMinimum CU_MEM_ALLOC_GRANULARITY_MINIMUM
 #define GPU_MANAGED_ATTRIBUTE cudaDevAttrManagedMemory
 #define GPU_CONCURRENT_MANAGED_ATTRIBUTE cudaDevAttrConcurrentManagedAccess
 #define GPU_PAGEABLE_ATTRIBUTE cudaDevAttrPageableMemoryAccess
@@ -162,6 +155,132 @@ bool check(gpuError_t status, const char* expression) {
   return false;
 }
 
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+bool driver_check(CUresult status, const char* expression) {
+  if (status == CUDA_SUCCESS) return true;
+  const char* message = "unknown CUDA driver error";
+  cuGetErrorString(status, &message);
+  std::cerr << expression << ": " << message << "\n";
+  return false;
+}
+#endif
+
+bool vmm_initialize() {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return true;
+#else
+  return driver_check(cuInit(0), "cuInit");
+#endif
+}
+
+bool vmm_get_granularity(
+    std::size_t* granularity, const gpuMemAllocationProp* property) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return check(
+      gpuMemGetAllocationGranularity(
+          granularity, property, gpuMemAllocationGranularityMinimum),
+      "hipMemGetAllocationGranularity");
+#else
+  return driver_check(
+      cuMemGetAllocationGranularity(
+          granularity, property, gpuMemAllocationGranularityMinimum),
+      "cuMemGetAllocationGranularity");
+#endif
+}
+
+bool vmm_create(
+    gpuMemGenericAllocationHandle_t* handle,
+    std::size_t bytes,
+    const gpuMemAllocationProp* property) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return check(gpuMemCreate(handle, bytes, property, 0), "hipMemCreate");
+#else
+  return driver_check(cuMemCreate(handle, bytes, property, 0), "cuMemCreate");
+#endif
+}
+
+bool vmm_reserve(std::uintptr_t* address, std::size_t bytes) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  void* reserved = nullptr;
+  if (!check(
+          gpuMemAddressReserve(&reserved, bytes, 0, nullptr, 0),
+          "hipMemAddressReserve")) {
+    return false;
+  }
+  *address = reinterpret_cast<std::uintptr_t>(reserved);
+  return true;
+#else
+  CUdeviceptr reserved = 0;
+  if (!driver_check(
+          cuMemAddressReserve(&reserved, bytes, 0, 0, 0),
+          "cuMemAddressReserve")) {
+    return false;
+  }
+  *address = static_cast<std::uintptr_t>(reserved);
+  return true;
+#endif
+}
+
+bool vmm_map(
+    std::uintptr_t address,
+    std::size_t bytes,
+    gpuMemGenericAllocationHandle_t handle) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return check(
+      gpuMemMap(reinterpret_cast<void*>(address), bytes, 0, handle, 0),
+      "hipMemMap");
+#else
+  return driver_check(
+      cuMemMap(static_cast<CUdeviceptr>(address), bytes, 0, handle, 0),
+      "cuMemMap");
+#endif
+}
+
+bool vmm_set_access(
+    std::uintptr_t address,
+    std::size_t bytes,
+    const gpuMemAccessDesc* access) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return check(
+      gpuMemSetAccess(reinterpret_cast<void*>(address), bytes, access, 1),
+      "hipMemSetAccess");
+#else
+  return driver_check(
+      cuMemSetAccess(static_cast<CUdeviceptr>(address), bytes, access, 1),
+      "cuMemSetAccess");
+#endif
+}
+
+bool vmm_unmap(std::uintptr_t address, std::size_t bytes) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return check(
+      gpuMemUnmap(reinterpret_cast<void*>(address), bytes), "hipMemUnmap");
+#else
+  return driver_check(
+      cuMemUnmap(static_cast<CUdeviceptr>(address), bytes), "cuMemUnmap");
+#endif
+}
+
+bool vmm_address_free(std::uintptr_t address, std::size_t bytes) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return check(
+      gpuMemAddressFree(reinterpret_cast<void*>(address), bytes),
+      "hipMemAddressFree");
+#else
+  return driver_check(
+      cuMemAddressFree(static_cast<CUdeviceptr>(address), bytes),
+      "cuMemAddressFree");
+#endif
+}
+
+bool vmm_release(gpuMemGenericAllocationHandle_t handle) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return check(gpuMemRelease(handle), "hipMemRelease");
+#else
+  return driver_check(cuMemRelease(handle), "cuMemRelease");
+#endif
+}
+
 std::string json_escape(const char* value) {
   std::ostringstream output;
   for (const unsigned char character : std::string(value)) {
@@ -214,7 +333,7 @@ bool gpu_elapsed(Launch launch, double* seconds) {
   gpuEvent_t stop{};
   if (!check(gpuEventCreate(&start), "gpuEventCreate(start)")) return false;
   if (!check(gpuEventCreate(&stop), "gpuEventCreate(stop)")) {
-    gpuEventDestroy(start);
+    static_cast<void>(gpuEventDestroy(start));
     return false;
   }
   bool ok = check(gpuEventRecord(start), "gpuEventRecord(start)");
@@ -225,8 +344,8 @@ bool gpu_elapsed(Launch launch, double* seconds) {
   float milliseconds = 0.0f;
   if (ok) ok = check(
       gpuEventElapsedTime(&milliseconds, start, stop), "gpuEventElapsedTime");
-  gpuEventDestroy(start);
-  gpuEventDestroy(stop);
+  static_cast<void>(gpuEventDestroy(start));
+  static_cast<void>(gpuEventDestroy(stop));
   if (!ok || !std::isfinite(milliseconds) || milliseconds <= 0.0f) return false;
   *seconds = static_cast<double>(milliseconds) / 1000.0;
   return true;
@@ -259,8 +378,12 @@ bool measure_gpu(
 }
 
 void release_managed(Allocation* allocation) {
-  if (allocation->destination != nullptr) gpuFree(allocation->destination);
-  if (allocation->source != nullptr) gpuFree(allocation->source);
+  if (allocation->destination != nullptr) {
+    static_cast<void>(gpuFree(allocation->destination));
+  }
+  if (allocation->source != nullptr) {
+    static_cast<void>(gpuFree(allocation->source));
+  }
   allocation->source = nullptr;
   allocation->destination = nullptr;
 }
@@ -274,17 +397,17 @@ void release_pageable(Allocation* allocation) {
 
 void release_vmm(Allocation* allocation) {
   if (allocation->destination_address != 0) {
-    gpuMemUnmap(
-        reinterpret_cast<void*>(allocation->destination_address), allocation->bytes);
-    gpuMemAddressFree(
-        reinterpret_cast<void*>(allocation->destination_address), allocation->bytes);
-    gpuMemRelease(allocation->destination_handle);
+    static_cast<void>(
+        vmm_unmap(allocation->destination_address, allocation->bytes));
+    static_cast<void>(
+        vmm_address_free(allocation->destination_address, allocation->bytes));
+    static_cast<void>(vmm_release(allocation->destination_handle));
   }
   if (allocation->source_address != 0) {
-    gpuMemUnmap(reinterpret_cast<void*>(allocation->source_address), allocation->bytes);
-    gpuMemAddressFree(
-        reinterpret_cast<void*>(allocation->source_address), allocation->bytes);
-    gpuMemRelease(allocation->source_handle);
+    static_cast<void>(vmm_unmap(allocation->source_address, allocation->bytes));
+    static_cast<void>(
+        vmm_address_free(allocation->source_address, allocation->bytes));
+    static_cast<void>(vmm_release(allocation->source_handle));
   }
   allocation->source = nullptr;
   allocation->destination = nullptr;
@@ -334,16 +457,14 @@ bool allocate_one_vmm(
   property.type = gpuMemAllocationTypePinned;
   property.location.type = gpuMemLocationTypeDevice;
   property.location.id = device;
-  if (!check(gpuMemCreate(handle, bytes, &property, 0), "gpuMemCreate")) return false;
-  void* reserved = nullptr;
-  if (!check(gpuMemAddressReserve(&reserved, bytes, 0, nullptr, 0), "gpuMemAddressReserve")) {
-    gpuMemRelease(*handle);
+  if (!vmm_create(handle, bytes, &property)) return false;
+  if (!vmm_reserve(address, bytes)) {
+    static_cast<void>(vmm_release(*handle));
     return false;
   }
-  *address = reinterpret_cast<std::uintptr_t>(reserved);
-  if (!check(gpuMemMap(reserved, bytes, 0, *handle, 0), "gpuMemMap")) {
-    gpuMemAddressFree(reserved, bytes);
-    gpuMemRelease(*handle);
+  if (!vmm_map(*address, bytes, *handle)) {
+    static_cast<void>(vmm_address_free(*address, bytes));
+    static_cast<void>(vmm_release(*handle));
     *address = 0;
     return false;
   }
@@ -351,10 +472,10 @@ bool allocate_one_vmm(
   access.location.type = gpuMemLocationTypeDevice;
   access.location.id = device;
   access.flags = gpuMemAccessFlagsProtReadWrite;
-  if (!check(gpuMemSetAccess(reserved, bytes, &access, 1), "gpuMemSetAccess")) {
-    gpuMemUnmap(reserved, bytes);
-    gpuMemAddressFree(reserved, bytes);
-    gpuMemRelease(*handle);
+  if (!vmm_set_access(*address, bytes, &access)) {
+    static_cast<void>(vmm_unmap(*address, bytes));
+    static_cast<void>(vmm_address_free(*address, bytes));
+    static_cast<void>(vmm_release(*handle));
     *address = 0;
     return false;
   }
@@ -362,15 +483,13 @@ bool allocate_one_vmm(
 }
 
 bool allocate_vmm(int device, std::size_t requested_bytes, Allocation* output) {
+  if (!vmm_initialize()) return false;
   gpuMemAllocationProp property{};
   property.type = gpuMemAllocationTypePinned;
   property.location.type = gpuMemLocationTypeDevice;
   property.location.id = device;
   std::size_t granularity = 0;
-  if (!check(
-          gpuMemGetAllocationGranularity(
-              &granularity, &property, gpuMemAllocationGranularityMinimum),
-          "gpuMemGetAllocationGranularity")) {
+  if (!vmm_get_granularity(&granularity, &property)) {
     return false;
   }
   if (granularity == 0) return false;
@@ -578,7 +697,7 @@ CaseResult measure_case(
     result.contention.reason = "steady_state_measurement_failed";
   }
 
-  gpuFree(sink);
+  static_cast<void>(gpuFree(sink));
   allocation->release(allocation);
   return result;
 }
