@@ -16,6 +16,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 SCHEMA_BY_KIND = {
     "allocation_matrix": "allocation_matrix.schema.json",
+    "allocation_matrix_v2": "allocation_matrix_v2.schema.json",
     "artifact_verification": "artifact_verification.schema.json",
     "bandwidth_soak": "bandwidth_soak.schema.json",
     "benchmark_contract": "benchmark_contract.schema.json",
@@ -29,6 +30,7 @@ SCHEMA_BY_KIND = {
     "native_stream_benchmark": "native_stream_benchmark.schema.json",
     "model_manifest": "model_manifest.schema.json",
     "oracle_smoke": "oracle_smoke.schema.json",
+    "reference_oracle_comparison": "reference_oracle_comparison.schema.json",
     "run_manifest": "run_manifest.schema.json",
     "safe_uma_budget": "safe_uma_budget.schema.json",
     "target_inventory": "target_inventory.schema.json",
@@ -205,6 +207,20 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
                 "$.command.environment_allowlist contains secret-like names: "
                 + ", ".join(sorted(unsafe_names))
             )
+    elif kind == "allocation_matrix_v2":
+        from .allocation_matrix_v2 import validate_allocation_matrix_v2_document
+
+        validate_allocation_matrix_v2_document(document)
+    elif kind == "reference_oracle_comparison":
+        from .reference_oracle import (
+            ReferenceOracleError,
+            validate_reference_oracle_comparison,
+        )
+
+        try:
+            validate_reference_oracle_comparison(document)
+        except ReferenceOracleError as exc:
+            raise ContractError(str(exc)) from exc
     elif kind == "target_inventory":
         target_ids = [target["id"] for target in document["targets"]]
         ssh_hosts = [target["ssh_host"] for target in document["targets"]]

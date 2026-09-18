@@ -161,6 +161,36 @@ def _build_parser() -> argparse.ArgumentParser:
     oracle_smoke_parser.add_argument("--target-id", required=True)
     oracle_smoke_parser.add_argument("--output", default="-")
 
+    reference_oracle_parser = subparsers.add_parser(
+        "compare-reference-oracle",
+        help="compare fixed single-expert, MoE-layer, or full-model tensor streams",
+    )
+    reference_oracle_parser.add_argument("reference_stream", type=Path)
+    reference_oracle_parser.add_argument("candidate_stream", type=Path)
+    reference_oracle_parser.add_argument("--oracle-id", required=True)
+    reference_oracle_parser.add_argument("--model-revision", required=True)
+    reference_oracle_parser.add_argument(
+        "--level",
+        choices=("single_expert", "single_moe_layer", "full_model"),
+        required=True,
+    )
+    reference_oracle_parser.add_argument("--layer-index", type=int)
+    reference_oracle_parser.add_argument("--expert-index", type=int)
+    reference_oracle_parser.add_argument("--fixture-id", required=True)
+    reference_oracle_parser.add_argument("--fixture-sha256", required=True)
+    reference_oracle_parser.add_argument("--reference-id", required=True)
+    reference_oracle_parser.add_argument("--reference-precision", required=True)
+    reference_oracle_parser.add_argument("--reference-artifact-sha256", required=True)
+    reference_oracle_parser.add_argument("--candidate-id", required=True)
+    reference_oracle_parser.add_argument("--candidate-precision", required=True)
+    reference_oracle_parser.add_argument("--candidate-artifact-sha256", required=True)
+    reference_oracle_parser.add_argument(
+        "--quality-policy",
+        type=Path,
+        help="optional JSON/YAML draft or frozen numerical threshold policy",
+    )
+    reference_oracle_parser.add_argument("--output", default="-")
+
     bandwidth_parser = subparsers.add_parser(
         "benchmark-memory-bandwidth",
         help="measure provisional GPU read/write/copy bandwidth on local UMA memory",
@@ -198,6 +228,32 @@ def _build_parser() -> argparse.ArgumentParser:
     allocation_parser.add_argument("--warmup", type=int, default=3)
     allocation_parser.add_argument("--iterations", type=int, default=10)
     allocation_parser.add_argument("--output", default="-")
+
+    allocation_v2_parser = subparsers.add_parser(
+        "benchmark-allocation-matrix-v2",
+        help="compile and measure native UMA paths at progressive pressure points",
+    )
+    allocation_v2_parser.add_argument("source", type=Path)
+    allocation_v2_parser.add_argument("--target-id", required=True)
+    allocation_v2_parser.add_argument(
+        "--backend", choices=("cuda", "hip"), required=True
+    )
+    allocation_v2_parser.add_argument("--arch", required=True)
+    allocation_v2_parser.add_argument(
+        "--buffer-mib",
+        type=int,
+        action="append",
+        dest="buffer_mib",
+        help="pressure point in MiB; repeat for a strictly increasing sequence",
+    )
+    allocation_v2_parser.add_argument("--warmup", type=int, default=3)
+    allocation_v2_parser.add_argument("--iterations", type=int, default=10)
+    allocation_v2_parser.add_argument("--inner-loops", type=int, default=1)
+    allocation_v2_parser.add_argument("--maximum-cv", type=float, default=0.03)
+    allocation_v2_parser.add_argument(
+        "--native-timeout-seconds", type=float, default=1800.0
+    )
+    allocation_v2_parser.add_argument("--output", default="-")
 
     allocation_capability_parser = subparsers.add_parser(
         "probe-native-allocation-capabilities",
@@ -475,6 +531,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _write_document(document, arguments.output)
             return 0
+        if arguments.command == "compare-reference-oracle":
+            from .reference_oracle import build_reference_oracle_comparison
+
+            quality_policy = (
+                load_document(arguments.quality_policy)
+                if arguments.quality_policy is not None
+                else None
+            )
+            document = build_reference_oracle_comparison(
+                arguments.reference_stream,
+                arguments.candidate_stream,
+                oracle_id=arguments.oracle_id,
+                model_revision=arguments.model_revision,
+                scope={
+                    "level": arguments.level,
+                    "layer_index": arguments.layer_index,
+                    "expert_index": arguments.expert_index,
+                },
+                fixture_id=arguments.fixture_id,
+                fixture_sha256=arguments.fixture_sha256,
+                reference_implementation={
+                    "id": arguments.reference_id,
+                    "precision": arguments.reference_precision,
+                    "artifact_sha256": arguments.reference_artifact_sha256,
+                },
+                candidate_implementation={
+                    "id": arguments.candidate_id,
+                    "precision": arguments.candidate_precision,
+                    "artifact_sha256": arguments.candidate_artifact_sha256,
+                },
+                quality_policy=quality_policy,
+            )
+            _write_document(document, arguments.output)
+            return 0
         if arguments.command == "benchmark-memory-bandwidth":
             from .memory_bandwidth import benchmark_memory_bandwidth
 
@@ -509,6 +599,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 requested_buffer_bytes=arguments.buffer_mib * 1024 * 1024,
                 warmup_iterations=arguments.warmup,
                 measured_iterations=arguments.iterations,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "benchmark-allocation-matrix-v2":
+            from .allocation_matrix_v2 import benchmark_allocation_matrix_v2
+
+            source_path = arguments.source.resolve()
+            project_root = find_project_root(source_path)
+            try:
+                source_relative = source_path.relative_to(project_root).as_posix()
+            except ValueError as exc:
+                raise ContractError(
+                    "Allocation Matrix v2 source must be inside project root"
+                ) from exc
+            buffer_mib = arguments.buffer_mib or [256, 1024, 4096, 8192]
+            document = benchmark_allocation_matrix_v2(
+                source_path,
+                source_relative_path=source_relative,
+                source_file_sha256=file_sha256(source_path),
+                target_id=arguments.target_id,
+                backend=arguments.backend,
+                architecture=arguments.arch,
+                buffer_sizes_bytes=[value * 1024 * 1024 for value in buffer_mib],
+                warmup_iterations=arguments.warmup,
+                measured_iterations=arguments.iterations,
+                inner_iterations=arguments.inner_loops,
+                maximum_coefficient_of_variation=arguments.maximum_cv,
+                native_timeout_seconds=arguments.native_timeout_seconds,
             )
             _write_document(document, arguments.output)
             return 0
