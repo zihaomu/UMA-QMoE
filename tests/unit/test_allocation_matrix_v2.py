@@ -347,3 +347,5 @@ def test_native_read_kernel_avoids_global_atomic_contention() -> None:
     )[0]
     assert "atomicAdd" not in read_kernel
     assert "sink[blockIdx.x]" in read_kernel
+    assert "constexpr int kThreads = 256;" in source
+    assert "const int threads = kThreads;" in source

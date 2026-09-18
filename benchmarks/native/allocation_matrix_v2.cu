@@ -92,6 +92,7 @@
 namespace {
 
 using Clock = std::chrono::steady_clock;
+constexpr int kThreads = 256;
 
 struct Faults {
   long minor = 0;
@@ -823,7 +824,7 @@ int main(int argc, char** argv) {
                  &host_page_tables, GPU_PAGE_TABLE_ATTRIBUTE, device),
              "pageable_memory_access_uses_host_page_tables")) return 3;
 
-  const int threads = 256;
+  const int threads = kThreads;
   const int blocks = properties.multiProcessorCount * 32;
   std::vector<CaseResult> cases;
 
