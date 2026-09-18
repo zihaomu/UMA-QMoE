@@ -526,6 +526,26 @@ def _coverage_and_stability(
     return coverage, stability
 
 
+def _allocation_compile_command(
+    *,
+    compiler: str,
+    backend: Literal["cuda", "hip"],
+    architecture: str,
+    source: Path,
+    executable: Path,
+) -> list[str]:
+    command = _native_compile_command(
+        compiler=compiler,
+        backend=backend,
+        architecture=architecture,
+        source=source,
+        executable=executable,
+    )
+    thread_flag = "-Xcompiler=-pthread" if backend == "cuda" else "-pthread"
+    command.insert(-2, thread_flag)
+    return command
+
+
 def benchmark_allocation_matrix_v2(
     source_path: str | Path,
     *,
@@ -611,14 +631,13 @@ def benchmark_allocation_matrix_v2(
 
     with tempfile.TemporaryDirectory(prefix="uma-qmoe-allocation-v2-") as directory:
         executable = Path(directory) / "allocation-matrix-v2"
-        compile_command = _native_compile_command(
+        compile_command = _allocation_compile_command(
             compiler=compiler,
             backend=backend,
             architecture=architecture,
             source=source,
             executable=executable,
         )
-        compile_command.insert(-2, "-pthread")
         _run_checked(compile_command, timeout=300.0)
 
         cgroup_root = _current_cgroup_root()
@@ -924,6 +943,7 @@ def validate_allocation_matrix_v2_document(document: Mapping[str, Any]) -> None:
 
 
 __all__ = [
+    "_allocation_compile_command",
     "_normalize_native_output",
     "_read_cgroup_state",
     "_read_vmstat",

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from uma_qmoe.allocation_matrix_v2 import (
+    _allocation_compile_command,
     _normalize_native_output,
     _read_cgroup_state,
     _read_vmstat,
@@ -301,3 +302,15 @@ def test_proc_and_cgroup_parsers_reject_incomplete_evidence(tmp_path: Path) -> N
 def test_schema_file_is_valid_json() -> None:
     schema = Path("src/uma_qmoe/schemas/allocation_matrix_v2.schema.json")
     assert json.loads(schema.read_text(encoding="utf-8"))["title"].endswith("v2")
+
+
+def test_cuda_compile_uses_nvcc_host_thread_flag(tmp_path: Path) -> None:
+    command = _allocation_compile_command(
+        compiler=str(tmp_path / "nvcc"),
+        backend="cuda",
+        architecture="sm_121",
+        source=Path("allocation_matrix_v2.cu"),
+        executable=Path("allocation-matrix-v2"),
+    )
+    assert "-Xcompiler=-pthread" in command
+    assert "-pthread" not in command
