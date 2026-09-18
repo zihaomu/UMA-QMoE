@@ -309,6 +309,43 @@ def _build_parser() -> argparse.ArgumentParser:
     budget_parser.add_argument("--decision-record", default="")
     budget_parser.add_argument("--output", default="-")
 
+    public_baseline_parser = subparsers.add_parser(
+        "normalize-public-baseline",
+        help="normalize one offline vLLM serving run into baseline evidence",
+    )
+    public_baseline_parser.add_argument("run_directory", type=Path)
+    public_baseline_parser.add_argument("--target-id", required=True)
+    public_baseline_parser.add_argument("--implementation-version", required=True)
+    public_baseline_parser.add_argument("--source-commit", required=True)
+    public_baseline_parser.add_argument(
+        "--backend", choices=("cuda", "hip"), required=True
+    )
+    public_baseline_parser.add_argument("--container-image", required=True)
+    public_baseline_parser.add_argument("--model-id", required=True)
+    public_baseline_parser.add_argument("--model-revision", required=True)
+    public_baseline_parser.add_argument("--derivation-semantic-sha256", required=True)
+    public_baseline_parser.add_argument("--input-tokens", type=int, required=True)
+    public_baseline_parser.add_argument("--output-tokens", type=int, required=True)
+    public_baseline_parser.add_argument("--warmup-requests", type=int, required=True)
+    public_baseline_parser.add_argument("--measured-requests", type=int, required=True)
+    public_baseline_parser.add_argument("--max-concurrency", type=int, required=True)
+    public_baseline_parser.add_argument("--output", default="-")
+
+    baseline_run_parser = subparsers.add_parser(
+        "build-public-baseline-run-manifest",
+        help="bind normalized baseline evidence and raw files into RunManifest v1",
+    )
+    baseline_run_parser.add_argument("baseline", type=Path)
+    baseline_run_parser.add_argument("run_directory", type=Path)
+    baseline_run_parser.add_argument("--run-id", required=True)
+    baseline_run_parser.add_argument("--git-commit", required=True)
+    baseline_run_parser.add_argument("--git-dirty", action="store_true")
+    baseline_run_parser.add_argument("--dirty-patch-sha256")
+    baseline_run_parser.add_argument("--machine-baseline-sha256", required=True)
+    baseline_run_parser.add_argument("--benchmark-contract-sha256", required=True)
+    baseline_run_parser.add_argument("--model-manifest-sha256", required=True)
+    baseline_run_parser.add_argument("--output", default="-")
+
     inventory_parser = subparsers.add_parser(
         "inventory-safetensors",
         help="stream-verify local Safetensors shards and hash every tensor payload",
@@ -711,6 +748,43 @@ def main(argv: Sequence[str] | None = None) -> int:
                 status=arguments.status,
                 policy_provenance=arguments.policy_provenance,
                 decision_record=arguments.decision_record,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "normalize-public-baseline":
+            from .public_baseline import build_public_baseline
+
+            document = build_public_baseline(
+                arguments.run_directory,
+                target_id=arguments.target_id,
+                implementation_version=arguments.implementation_version,
+                source_commit=arguments.source_commit,
+                backend=arguments.backend,
+                container_image=arguments.container_image,
+                model_id=arguments.model_id,
+                model_revision=arguments.model_revision,
+                derivation_semantic_sha256=arguments.derivation_semantic_sha256,
+                input_tokens=arguments.input_tokens,
+                output_tokens=arguments.output_tokens,
+                warmup_requests=arguments.warmup_requests,
+                measured_requests=arguments.measured_requests,
+                max_concurrency=arguments.max_concurrency,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-public-baseline-run-manifest":
+            from .public_baseline import build_public_baseline_run_manifest
+
+            document = build_public_baseline_run_manifest(
+                arguments.baseline,
+                arguments.run_directory,
+                run_id=arguments.run_id,
+                git_commit=arguments.git_commit,
+                git_dirty=arguments.git_dirty,
+                dirty_patch_sha256=arguments.dirty_patch_sha256,
+                machine_baseline_sha256=arguments.machine_baseline_sha256,
+                benchmark_contract_sha256=arguments.benchmark_contract_sha256,
+                model_manifest_sha256=arguments.model_manifest_sha256,
             )
             _write_document(document, arguments.output)
             return 0

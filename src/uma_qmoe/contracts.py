@@ -30,6 +30,7 @@ SCHEMA_BY_KIND = {
     "native_stream_benchmark": "native_stream_benchmark.schema.json",
     "model_manifest": "model_manifest.schema.json",
     "oracle_smoke": "oracle_smoke.schema.json",
+    "public_baseline": "public_baseline.schema.json",
     "reference_oracle_comparison": "reference_oracle_comparison.schema.json",
     "run_manifest": "run_manifest.schema.json",
     "safe_uma_budget": "safe_uma_budget.schema.json",
@@ -221,6 +222,43 @@ def validate_document(document: Mapping[str, Any], *, require_frozen: bool = Fal
             validate_reference_oracle_comparison(document)
         except ReferenceOracleError as exc:
             raise ContractError(str(exc)) from exc
+    elif kind == "public_baseline":
+        results = document["results"]
+        duration = results["duration_seconds"]
+        expected_throughput = {
+            "request_throughput": results["completed_requests"] / duration,
+            "output_token_throughput": results["total_output_tokens"] / duration,
+            "total_token_throughput": (
+                results["total_input_tokens"] + results["total_output_tokens"]
+            )
+            / duration,
+        }
+        if any(
+            not math.isclose(results[field], expected, rel_tol=1e-6, abs_tol=1e-9)
+            for field, expected in expected_throughput.items()
+        ):
+            raise ContractError("Public Baseline throughput does not match counts/duration")
+        for name in ("ttft_ms", "tpot_ms", "e2el_ms"):
+            summary = results[name]
+            if not (
+                summary["p50"]
+                <= summary["p95"]
+                <= summary["p99"]
+                <= summary["max"]
+            ) or summary["mean"] > summary["max"]:
+                raise ContractError(f"Public Baseline {name} summary is invalid")
+        paths = [artifact["path"] for artifact in document["raw_artifacts"]]
+        if len(paths) != len(set(paths)):
+            raise ContractError("Public Baseline raw artifacts contain duplicate paths")
+        gates = document["gates"]
+        expected_overall = all(
+            value for name, value in gates.items() if name != "overall_passed"
+        )
+        if gates["overall_passed"] != expected_overall:
+            raise ContractError("Public Baseline overall gate is inconsistent")
+        expected_status = "passed" if expected_overall else "failed"
+        if document["status"] != expected_status:
+            raise ContractError("Public Baseline status does not match its gates")
     elif kind == "target_inventory":
         target_ids = [target["id"] for target in document["targets"]]
         ssh_hosts = [target["ssh_host"] for target in document["targets"]]
