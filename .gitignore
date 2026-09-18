@@ -67,3 +67,21 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python environments and build products
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# Local benchmark and model artifacts
+/artifacts/
+/models/cache/
+/benchmarks/runs/
+
+# Private project design, experiment notes, and local planning documents
+/docs_private/

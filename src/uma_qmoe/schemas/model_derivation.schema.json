@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/model_derivation.schema.json",
+  "title": "UMA-QMoE ModelDerivation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "derivation_id",
+    "status",
+    "source",
+    "transform",
+    "artifact_root",
+    "config",
+    "tokenizer_files",
+    "weights"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "model_derivation" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "derivation_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "const": "verified" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "model_revision",
+        "model_manifest_path",
+        "model_manifest_sha256",
+        "tensor_inventory_path",
+        "tensor_inventory_sha256"
+      ],
+      "properties": {
+        "model_id": { "type": "string", "minLength": 1 },
+        "model_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "model_manifest_path": { "type": "string", "minLength": 1 },
+        "model_manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "tensor_inventory_path": { "type": "string", "minLength": 1 },
+        "tensor_inventory_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_dtype",
+        "target_dtype",
+        "rounding",
+        "nan_policy",
+        "implementation",
+        "chunk_bytes"
+      ],
+      "properties": {
+        "id": { "const": "f32_to_bf16_rne_v1" },
+        "source_dtype": { "const": "F32" },
+        "target_dtype": { "const": "BF16" },
+        "rounding": { "const": "round_to_nearest_even" },
+        "nan_policy": { "const": "preserve_nan" },
+        "implementation": { "const": "uma_qmoe.bf16" },
+        "chunk_bytes": { "type": "integer", "minimum": 4 }
+      }
+    },
+    "artifact_root": { "type": "string", "minLength": 1 },
+    "config": { "$ref": "#/$defs/fileIdentity" },
+    "tokenizer_files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fileIdentity" }
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "observed_dtypes", "artifacts", "total_artifact_bytes"],
+      "properties": {
+        "format": { "const": "safetensors" },
+        "observed_dtypes": { "const": ["BF16"] },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/fileIdentity" }
+        },
+        "total_artifact_bytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

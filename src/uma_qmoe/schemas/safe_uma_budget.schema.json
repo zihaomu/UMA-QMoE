@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/safe_uma_budget.schema.json",
+  "title": "UMA-QMoE SafeUmaBudget v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "target_id",
+    "source_snapshot_sha256",
+    "status",
+    "policy_provenance",
+    "decision_record",
+    "mem_total_bytes",
+    "cgroup_memory_max_bytes",
+    "physical_limit_bytes",
+    "os_daemon_reserve_bytes",
+    "runtime_reserve_bytes",
+    "kv_budget_bytes",
+    "workspace_budget_bytes",
+    "safety_margin_bytes",
+    "total_reserved_bytes",
+    "safe_budget_bytes"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "safe_uma_budget" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "source_snapshot_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "status": { "enum": ["draft", "frozen"] },
+    "policy_provenance": { "type": "string" },
+    "decision_record": { "type": "string" },
+    "mem_total_bytes": { "$ref": "#/$defs/bytes" },
+    "cgroup_memory_max_bytes": { "type": ["integer", "null"], "minimum": 0 },
+    "physical_limit_bytes": { "$ref": "#/$defs/bytes" },
+    "os_daemon_reserve_bytes": { "$ref": "#/$defs/bytes" },
+    "runtime_reserve_bytes": { "$ref": "#/$defs/bytes" },
+    "kv_budget_bytes": { "$ref": "#/$defs/bytes" },
+    "workspace_budget_bytes": { "$ref": "#/$defs/bytes" },
+    "safety_margin_bytes": { "$ref": "#/$defs/bytes" },
+    "total_reserved_bytes": { "$ref": "#/$defs/bytes" },
+    "safe_budget_bytes": { "$ref": "#/$defs/bytes" }
+  },
+  "$defs": {
+    "bytes": { "type": "integer", "minimum": 0 }
+  }
+}

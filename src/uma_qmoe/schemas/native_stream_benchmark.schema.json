@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/native_stream_benchmark.schema.json",
+  "title": "UMA-QMoE NativeStreamBenchmark v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "target_id",
+    "status",
+    "source",
+    "build",
+    "runtime",
+    "configuration",
+    "measurement_scope",
+    "operations"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "native_stream_benchmark" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "const": "passed" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "compiler", "compiler_version", "architecture", "optimization"],
+      "properties": {
+        "backend": { "enum": ["cuda", "hip"] },
+        "compiler": { "enum": ["nvcc", "hipcc"] },
+        "compiler_version": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "architecture": { "type": "string", "pattern": "^[A-Za-z0-9_.+-]+$" },
+        "optimization": { "const": "O3" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "device_name", "multiprocessor_count", "threads_per_block", "blocks"],
+      "properties": {
+        "backend": { "enum": ["cuda", "hip"] },
+        "device_name": { "type": "string", "minLength": 1 },
+        "multiprocessor_count": { "type": "integer", "minimum": 1 },
+        "threads_per_block": { "type": "integer", "minimum": 1 },
+        "blocks": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested_buffer_bytes",
+        "actual_buffer_bytes",
+        "warmup_iterations",
+        "measured_iterations",
+        "inner_iterations"
+      ],
+      "properties": {
+        "requested_buffer_bytes": { "type": "integer", "minimum": 4194304 },
+        "actual_buffer_bytes": { "type": "integer", "minimum": 4194304 },
+        "warmup_iterations": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "measured_iterations": { "type": "integer", "minimum": 3, "maximum": 100 },
+        "inner_iterations": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "measurement_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["elapsed_time", "traffic", "counter_calibrated", "limitations"],
+      "properties": {
+        "elapsed_time": { "const": "gpu_events" },
+        "traffic": { "const": "algorithmic_bytes" },
+        "counter_calibrated": { "const": false },
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "algorithmic_read_bytes",
+          "algorithmic_write_bytes",
+          "algorithmic_total_bytes",
+          "samples_seconds",
+          "median_seconds",
+          "mean_seconds",
+          "coefficient_of_variation",
+          "effective_gbps"
+        ],
+        "properties": {
+          "id": { "enum": ["read_reduce", "write", "copy"] },
+          "algorithmic_read_bytes": { "type": "integer", "minimum": 0 },
+          "algorithmic_write_bytes": { "type": "integer", "minimum": 0 },
+          "algorithmic_total_bytes": { "type": "integer", "minimum": 1 },
+          "samples_seconds": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 100,
+            "items": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "median_seconds": { "type": "number", "exclusiveMinimum": 0 },
+          "mean_seconds": { "type": "number", "exclusiveMinimum": 0 },
+          "coefficient_of_variation": { "type": "number", "minimum": 0 },
+          "effective_gbps": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    }
+  }
+}

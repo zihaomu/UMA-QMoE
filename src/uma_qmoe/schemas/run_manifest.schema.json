@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/run_manifest.schema.json",
+  "title": "UMA-QMoE RunManifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "run_id",
+    "status",
+    "created_at",
+    "git",
+    "target",
+    "inputs",
+    "command",
+    "conditions",
+    "raw_artifacts",
+    "aggregation",
+    "result_class"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "run_manifest" },
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]+$" },
+    "status": { "enum": ["planned", "running", "succeeded", "failed", "cancelled"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": ["string", "null"], "format": "date-time" },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "dirty", "dirty_patch_sha256"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "dirty": { "type": "boolean" },
+        "dirty_patch_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "machine_baseline_sha256", "container_image"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+        "machine_baseline_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "container_image": { "type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["benchmark_contract_sha256", "model_manifest_sha256"],
+      "properties": {
+        "benchmark_contract_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "model_manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "route_trace_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "quant_policy_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "expert_pack_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argv", "environment_allowlist"],
+      "properties": {
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "environment_allowlist": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["power_mode", "temperature_celsius", "memory_available_bytes"],
+      "properties": {
+        "power_mode": { "type": ["string", "null"] },
+        "temperature_celsius": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": { "type": ["number", "null"] },
+            "end": { "type": ["number", "null"] }
+          }
+        },
+        "memory_available_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": { "type": ["integer", "null"], "minimum": 0 },
+            "end": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        }
+      }
+    },
+    "raw_artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "aggregation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "sample_count", "report_quantiles"],
+      "properties": {
+        "method": { "enum": ["none", "median"] },
+        "sample_count": { "type": "integer", "minimum": 0 },
+        "report_quantiles": {
+          "type": "array",
+          "items": { "enum": ["p50", "p95", "p99"] },
+          "uniqueItems": true
+        }
+      }
+    },
+    "result_class": {
+      "enum": ["pending", "speed_win", "capacity_win", "efficiency_win", "research_negative"]
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

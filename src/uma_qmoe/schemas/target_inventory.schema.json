@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/target_inventory.schema.json",
+  "title": "UMA-QMoE TargetInventory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "workspace", "defaults", "targets"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "target_inventory" },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_root",
+        "project_dir",
+        "models_dir",
+        "datasets_dir",
+        "artifacts_dir",
+        "private_dir",
+        "known_hosts_file"
+      ],
+      "properties": {
+        "local_root": { "$ref": "#/$defs/absolutePath" },
+        "project_dir": { "$ref": "#/$defs/workspaceRelativePath" },
+        "models_dir": { "$ref": "#/$defs/workspaceRelativePath" },
+        "datasets_dir": { "$ref": "#/$defs/workspaceRelativePath" },
+        "artifacts_dir": { "$ref": "#/$defs/workspaceRelativePath" },
+        "private_dir": { "$ref": "#/$defs/workspaceRelativePath" },
+        "known_hosts_file": { "$ref": "#/$defs/workspaceRelativePath" }
+      }
+    },
+    "defaults": { "$ref": "#/$defs/jobPolicy" },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/target" }
+    }
+  },
+  "$defs": {
+    "absolutePath": {
+      "type": "string",
+      "pattern": "^/[^\\u0000]*$"
+    },
+    "workspaceRelativePath": {
+      "type": "string",
+      "pattern": "^\\./[^\\u0000]*$"
+    },
+    "jobPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gpus_per_job", "max_parallel_jobs", "busy_policy", "busy_timeout_seconds"],
+      "properties": {
+        "gpus_per_job": { "type": "integer", "minimum": 1 },
+        "max_parallel_jobs": { "type": "integer", "minimum": 1 },
+        "busy_policy": { "enum": ["wait", "fail"] },
+        "busy_timeout_seconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ssh_host",
+        "remote_root",
+        "expected",
+        "gpu_ids",
+        "gpus_per_job",
+        "max_parallel_jobs",
+        "busy_policy",
+        "busy_timeout_seconds",
+        "container"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+        "ssh_host": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]+$" },
+        "remote_root": { "$ref": "#/$defs/absolutePath" },
+        "expected": { "$ref": "#/$defs/expectedTarget" },
+        "gpu_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "gpus_per_job": { "type": "integer", "minimum": 1 },
+        "max_parallel_jobs": { "type": "integer", "minimum": 1 },
+        "busy_policy": { "enum": ["wait", "fail"] },
+        "busy_timeout_seconds": { "type": "integer", "minimum": 0 },
+        "container": { "$ref": "#/$defs/container" }
+      }
+    },
+    "expectedTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostname",
+        "host_architecture",
+        "platform",
+        "accelerator",
+        "accelerator_architecture",
+        "compute_backend",
+        "unified_memory",
+        "nominal_memory_gb",
+        "nominal_memory_bandwidth_gbps"
+      ],
+      "properties": {
+        "hostname": { "type": "string", "minLength": 1 },
+        "host_architecture": { "enum": ["x86_64", "aarch64"] },
+        "platform": { "type": "string", "minLength": 1 },
+        "accelerator": { "type": "string", "minLength": 1 },
+        "accelerator_architecture": { "type": "string", "minLength": 1 },
+        "compute_capability": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "compute_backend": { "enum": ["cuda", "hip"] },
+        "fallback_backend": { "enum": ["vulkan", "cpu"] },
+        "unified_memory": { "const": true },
+        "nominal_memory_gb": { "type": "integer", "minimum": 1 },
+        "nominal_memory_bandwidth_gbps": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "compute_backend": { "const": "cuda" } } },
+          "then": { "required": ["compute_capability"] }
+        }
+      ]
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime",
+        "image",
+        "source_repository",
+        "source_commit",
+        "source_ref",
+        "workdir",
+        "gpu_access",
+        "devices",
+        "security_options",
+        "mounts",
+        "environment_from_host"
+      ],
+      "properties": {
+        "runtime": { "const": "docker" },
+        "image": { "type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$" },
+        "source_repository": { "type": "string", "format": "uri" },
+        "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "workdir": { "$ref": "#/$defs/absolutePath" },
+        "gpu_access": { "enum": ["nvidia_all", "device_nodes"] },
+        "devices": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/absolutePath" }
+        },
+        "security_options": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "mounts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "target", "read_only"],
+            "properties": {
+              "source": { "$ref": "#/$defs/absolutePath" },
+              "target": { "$ref": "#/$defs/absolutePath" },
+              "read_only": { "type": "boolean" }
+            }
+          }
+        },
+        "environment_from_host": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+        }
+      }
+    }
+  }
+}

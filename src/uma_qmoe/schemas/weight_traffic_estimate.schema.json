@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/weight_traffic_estimate.schema.json",
+  "title": "UMA-QMoE WeightTrafficEstimate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "model_manifest_path",
+    "model_manifest_sha256",
+    "tensor_inventory_path",
+    "tensor_inventory_sha256",
+    "scenario",
+    "quantization",
+    "model",
+    "counts",
+    "storage",
+    "per_token",
+    "exclusions"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "weight_traffic_estimate" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "model_manifest_path": { "type": "string", "minLength": 1 },
+    "model_manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "tensor_inventory_path": { "type": "string", "minLength": 1 },
+    "tensor_inventory_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "scenario": { "const": "decode_batch1_cold_weight_read" },
+    "quantization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dense_bits_per_element",
+        "expert_bits_per_element",
+        "group_size",
+        "scale_bytes_per_group",
+        "zero_point_bytes_per_group",
+        "tensor_alignment_bytes"
+      ],
+      "properties": {
+        "dense_bits_per_element": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "expert_bits_per_element": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "group_size": { "type": "integer", "minimum": 1 },
+        "scale_bytes_per_group": { "type": "integer", "minimum": 0 },
+        "zero_point_bytes_per_group": { "type": "integer", "minimum": 0 },
+        "tensor_alignment_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["num_layers", "num_experts", "top_k"],
+      "properties": {
+        "num_layers": { "type": "integer", "minimum": 1 },
+        "num_experts": { "type": "integer", "minimum": 1 },
+        "top_k": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expert_tensor_count",
+        "expert_parameter_count",
+        "dense_tensor_count",
+        "dense_parameter_count"
+      ],
+      "properties": {
+        "expert_tensor_count": { "type": "integer", "minimum": 1 },
+        "expert_parameter_count": { "type": "integer", "minimum": 1 },
+        "dense_tensor_count": { "type": "integer", "minimum": 1 },
+        "dense_parameter_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "storage": { "$ref": "#/$defs/byteBreakdown" },
+    "per_token": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expert_selection",
+        "embedding_lookup",
+        "dense_weight_bytes",
+        "active_expert_payload_bytes",
+        "active_expert_metadata_bytes",
+        "active_expert_padding_bytes",
+        "total_weight_bytes"
+      ],
+      "properties": {
+        "expert_selection": { "const": "worst_case_top_k_per_layer" },
+        "embedding_lookup": { "const": "one_row_per_token" },
+        "dense_weight_bytes": { "type": "integer", "minimum": 0 },
+        "active_expert_payload_bytes": { "type": "integer", "minimum": 0 },
+        "active_expert_metadata_bytes": { "type": "integer", "minimum": 0 },
+        "active_expert_padding_bytes": { "type": "integer", "minimum": 0 },
+        "total_weight_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "exclusions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "byteBreakdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dense_weight_bytes",
+        "expert_payload_bytes",
+        "expert_metadata_bytes",
+        "expert_padding_bytes",
+        "total_weight_bytes"
+      ],
+      "properties": {
+        "dense_weight_bytes": { "type": "integer", "minimum": 0 },
+        "expert_payload_bytes": { "type": "integer", "minimum": 0 },
+        "expert_metadata_bytes": { "type": "integer", "minimum": 0 },
+        "expert_padding_bytes": { "type": "integer", "minimum": 0 },
+        "total_weight_bytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

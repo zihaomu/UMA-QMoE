@@ -1,0 +1,136 @@
+schema_version: 1
+kind: benchmark_contract
+contract_id: olmoe_1b_7b_0125_m0_m2_v1
+status: draft
+milestones: [M0, M1, M2]
+
+model:
+  manifest_path: models/manifests/olmoe_1b_7b_0125.yaml
+  manifest_sha256: 86b64e02741c58be9ba23cc617eb7c6f36e01d7216577fa874885b708f245dfb
+
+targets:
+  - id: halo3
+    accelerator_architecture: gfx1151
+    backend: hip
+    container_image: ghcr.io/inferstation/vllm-rocm-halo@sha256:13d6a8e2de3e582c42d4067469c0da0c21bedd117f77a9fe95934312ee052663
+    runtime_source_commit: 554a3d41f0922ee7c7f41da5a53ff891b0d0cbbb
+    runtime_source_ref: gfx11
+  - id: spark1
+    accelerator_architecture: sm_121a
+    backend: cuda
+    container_image: ghcr.io/inferstation/vllm-cuda-spark@sha256:2f7bf5e1abe0597cdefaa22c2f6d0ebc8da09ff5f3a11bac4f54722a90fb8835
+    runtime_source_commit: 98dff2a81d747d1dba01a47f939f48c3526d4206
+    runtime_source_ref: v0.29.0
+
+oracle:
+  weight_dtype: bfloat16
+  compute_dtype: bfloat16
+  derivation:
+    path: models/manifests/olmoe_1b_7b_0125_bf16_oracle.yaml
+    sha256: d35874d022c2b7f4f49fbf187b739994aaa183db8a2b60cb2b6846619b3fbbbb
+  decoding:
+    strategy: greedy
+    temperature: 0
+    seed: 20260917
+  prompt_fixture:
+    path: benchmarks/fixtures/olmoe_smoke_v1.jsonl
+    sha256: c177aa202f8ea8e209402f6845b10f91d0c11be8ea479ff65500b087082bb079
+
+# OLMoE has a native context window of 4096. Active scenarios must keep
+# prompt_tokens + max_new_tokens within that boundary.
+workloads:
+  - id: smoke_b1
+    status: active
+    phase: end_to_end
+    batch_size: 1
+    prompt_tokens: 128
+    max_new_tokens: 32
+    required_from: M0
+  - id: latency_decode_2k_b1
+    status: active
+    phase: decode
+    batch_size: 1
+    prompt_tokens: 2048
+    max_new_tokens: 256
+    required_from: M2
+  - id: latency_decode_near_limit_b1
+    status: active
+    phase: decode
+    batch_size: 1
+    prompt_tokens: 3584
+    max_new_tokens: 256
+    required_from: M2
+  - id: small_batch_decode_b8
+    status: active
+    phase: decode
+    batch_size: 8
+    prompt_tokens: 2048
+    max_new_tokens: 256
+    required_from: M2
+  - id: throughput_decode_b32
+    status: active
+    phase: decode
+    batch_size: 32
+    prompt_tokens: 2048
+    max_new_tokens: 256
+    required_from: M2
+  - id: native_32k_context
+    status: not_applicable
+    not_applicable_reason: OLMoE model-native context is 4096; no silent RoPE semantic change
+    phase: end_to_end
+    batch_size: 1
+    prompt_tokens: 32768
+    max_new_tokens: 256
+    required_from: phase_2
+
+quality_gates:
+  - id: q4_nll_ppl
+    applicability: pending
+    pending_reason: dataset revision and immutable sample IDs are not frozen yet
+    required_from: M2
+    max_relative_nll_ppl_increase: 0.01
+  - id: q4_normalized_completion_score
+    applicability: pending
+    pending_reason: completion-form math/code evaluation set is not frozen yet
+    required_from: M2
+    max_normalized_task_score_drop_points: 0.5
+  - id: q4_router_top_k_agreement
+    applicability: pending
+    pending_reason: first immutable OLMoE RouteTrace has not been captured
+    required_from: M2
+    min_router_top_k_set_agreement: 0.99
+  - id: instruction_chat_tool_use
+    applicability: not_applicable
+    not_applicable_reason: selected checkpoint is Base, not SFT or Instruct
+    required_from: M2
+
+correctness:
+  allow_nan: false
+  allow_inf: false
+  allow_catastrophic_task_regression: false
+
+resource_gates:
+  max_swap_bytes: 0
+  max_major_page_faults: 0
+  safe_uma_budget:
+    status: pending_measurement
+    references: []
+  single_compressed_weight_copy: true
+  allow_global_dequantized_expert: false
+
+traffic_accounting:
+  maximum_absolute_counter_error: 0.10
+  fallback_mode: relative_only
+
+statistics:
+  warmup_runs: 3
+  minimum_samples: 10
+  report_quantiles: [p50, p95, p99]
+  kernel_max_cv: 0.03
+  end_to_end_max_cv: 0.05
+  comparison_order: interleaved
+
+blocking_items:
+  - Freeze quality dataset revisions and immutable sample ID lists
+  - Capture the first immutable OLMoE RouteTrace
+  - Measure and freeze Safe UMA Budget on halo3 and spark1
