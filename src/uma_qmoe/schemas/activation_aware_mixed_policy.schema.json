@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://uma-qmoe.local/schemas/activation_aware_mixed_policy.schema.json",
-  "title": "UMA-QMoE ActivationAwareMixedPolicy v1",
+  "title": "UMA-QMoE ActivationAwareMixedPolicy v1/v2",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "method", "dataset", "reference", "source_q8_base_metrics", "q8_base_metrics", "q8_base_reproduced", "policy", "storage", "quality_gate", "gates"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "kind": { "const": "activation_aware_mixed_policy" },
     "captured_at": { "type": "string", "format": "date-time" },
     "target_id": { "enum": ["halo3", "spark1"] },
@@ -23,7 +23,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "source_reverse_layer_evidence", "prompt_fixture", "calibration_only", "performance_evidence", "q4_group_size", "q4_clip_ratios", "q8_group_size"],
       "properties": {
-        "id": { "const": "layer15-awq-q4-q8-bf16-mixed-v1" },
+        "id": { "enum": ["layer15-awq-q4-q8-bf16-mixed-v1", "layer15-awq-q4-q8-bf16-mixed-v2"] },
         "source_reverse_layer_evidence": { "$ref": "#/$defs/identity" },
         "prompt_fixture": { "$ref": "#/$defs/identity" },
         "calibration_only": { "const": false },
@@ -55,10 +55,10 @@
       "type": "object", "additionalProperties": false,
       "required": ["policy_id", "q4_layers", "q8_layers", "bf16_layers", "effective_bpw", "projected_payload_bytes", "metrics"],
       "properties": {
-        "policy_id": { "const": "olmoe-layer15-awq-q4-q8-bf16-v1" },
+        "policy_id": { "enum": ["olmoe-layer15-awq-q4-q8-bf16-v1", "olmoe-layer15-awq-q4-q8-bf16-v2"] },
         "q4_layers": { "const": [15] },
-        "q8_layers": { "const": [8, 11, 12, 13, 14] },
-        "bf16_layers": { "const": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10] },
+        "q8_layers": { "enum": [[8, 11, 12, 13, 14], [11, 12, 13, 14]] },
+        "bf16_layers": { "enum": [[0, 1, 2, 3, 4, 5, 6, 7, 9, 10], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]] },
         "effective_bpw": { "type": "number", "exclusiveMinimum": 0 },
         "projected_payload_bytes": { "type": "integer", "minimum": 1 },
         "metrics": { "$ref": "#/$defs/metrics" }

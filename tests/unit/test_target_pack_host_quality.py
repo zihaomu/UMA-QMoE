@@ -101,6 +101,21 @@ def test_target_pack_host_quality_accepts_complete_evidence() -> None:
     validate_document(_document())
 
 
+def test_target_pack_host_quality_accepts_v2_policy_layers() -> None:
+    document = _document()
+    document["target_pack"].update(
+        {
+            "policy_id": "olmoe-layer15-awq-q4-q8-bf16-v2",
+            "layer_encodings": {
+                "q4_layers": [15],
+                "q8_layers": [11, 12, 13, 14],
+                "bf16_layers": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            },
+        }
+    )
+    validate_document(document)
+
+
 def test_target_pack_host_quality_rejects_metric_tampering() -> None:
     document = _document()
     document["candidate"]["relative_perplexity_change"] = 0.5

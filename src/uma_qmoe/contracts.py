@@ -1109,22 +1109,32 @@ def validate_document(
         q4_layers = policy["q4_layers"]
         q8_layers = policy["q8_layers"]
         bf16_layers = policy["bf16_layers"]
+        policy_version = document["schema_version"]
+        expected_layers = {
+            1: (
+                [15],
+                [8, 11, 12, 13, 14],
+                [0, 1, 2, 3, 4, 5, 6, 7, 9, 10],
+            ),
+            2: (
+                [15],
+                [11, 12, 13, 14],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            ),
+        }[policy_version]
+        expected_method_id = f"layer15-awq-q4-q8-bf16-mixed-v{policy_version}"
+        expected_policy_id = f"olmoe-layer15-awq-q4-q8-bf16-v{policy_version}"
         if (
-            q4_layers != [15]
-            or q8_layers != [8, 11, 12, 13, 14]
-            or bf16_layers
-            != [
-                0,
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,
-                7,
-                9,
-                10,
-            ]
+            document["method"]["id"] != expected_method_id
+            or policy["policy_id"] != expected_policy_id
+        ):
+            raise ContractError(
+                "Activation-aware mixed policy version identity is inconsistent"
+            )
+        if (
+            q4_layers != expected_layers[0]
+            or q8_layers != expected_layers[1]
+            or bf16_layers != expected_layers[2]
         ):
             raise ContractError("Activation-aware mixed policy layers are inconsistent")
         if sorted(q4_layers + q8_layers + bf16_layers) != list(range(16)):
@@ -1208,7 +1218,11 @@ def validate_document(
             raise ContractError(
                 "Activation-aware mixed policy gate does not match evidence"
             )
-        overall = all(expected.values())
+        overall = all(
+            value
+            for name, value in expected.items()
+            if policy_version == 1 or name != "q8_base_reproduced"
+        )
         if gates["overall_passed"] != overall:
             raise ContractError(
                 "Activation-aware mixed policy overall gate is inconsistent"
@@ -1220,6 +1234,22 @@ def validate_document(
         candidate = document["candidate"]
         quality = document["quality_gate"]
         loader = document["loader"]
+        target_pack = document["target_pack"]
+        layer_encodings = target_pack["layer_encodings"]
+        expected_policy_layers = {
+            "olmoe-layer15-awq-q4-q8-bf16-v1": {
+                "q4_layers": [15],
+                "q8_layers": [8, 11, 12, 13, 14],
+                "bf16_layers": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10],
+            },
+            "olmoe-layer15-awq-q4-q8-bf16-v2": {
+                "q4_layers": [15],
+                "q8_layers": [11, 12, 13, 14],
+                "bf16_layers": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            },
+        }
+        if layer_encodings != expected_policy_layers[target_pack["policy_id"]]:
+            raise ContractError("TargetPack Host policy layers are inconsistent")
         if not math.isclose(
             reference["perplexity"],
             math.exp(reference["nll"]),

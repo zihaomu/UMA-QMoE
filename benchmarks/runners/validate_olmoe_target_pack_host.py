@@ -27,10 +27,10 @@ from uma_qmoe.contracts import canonical_sha256, validate_document
 
 MODEL_ID = "allenai/OLMoE-1B-7B-0125"
 MODEL_REVISION = "9b0c1aa87e34a20052389dce1f0cf01da783f654"
-POLICY_ID = "olmoe-layer15-awq-q4-q8-bf16-v1"
+POLICY_ID = "olmoe-layer15-awq-q4-q8-bf16-v2"
 Q4_LAYERS = [15]
-Q8_LAYERS = [8, 11, 12, 13, 14]
-BF16_LAYERS = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10]
+Q8_LAYERS = [11, 12, 13, 14]
+BF16_LAYERS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def _parser() -> argparse.ArgumentParser:

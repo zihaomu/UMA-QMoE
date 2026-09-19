@@ -28,15 +28,15 @@
         "artifact_size_bytes": { "type": "integer", "minimum": 1 },
         "manifest_file_sha256": { "$ref": "#/$defs/sha256" },
         "manifest_semantic_sha256": { "$ref": "#/$defs/sha256" },
-        "policy_id": { "const": "olmoe-layer15-awq-q4-q8-bf16-v1" },
+        "policy_id": { "enum": ["olmoe-layer15-awq-q4-q8-bf16-v1", "olmoe-layer15-awq-q4-q8-bf16-v2"] },
         "policy_evidence_semantic_sha256": { "$ref": "#/$defs/sha256" },
         "layer_encodings": {
           "type": "object", "additionalProperties": false,
           "required": ["q4_layers", "q8_layers", "bf16_layers"],
           "properties": {
             "q4_layers": { "const": [15] },
-            "q8_layers": { "const": [8, 11, 12, 13, 14] },
-            "bf16_layers": { "const": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10] }
+            "q8_layers": { "enum": [[8, 11, 12, 13, 14], [11, 12, 13, 14]] },
+            "bf16_layers": { "enum": [[0, 1, 2, 3, 4, 5, 6, 7, 9, 10], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]] }
           }
         }
       }
