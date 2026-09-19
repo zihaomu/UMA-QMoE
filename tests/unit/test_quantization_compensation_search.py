@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import math
+from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 import pytest
 
 from uma_qmoe.contracts import ContractError, validate_document
+
+
+RUNNER_DIRECTORY = Path(__file__).parents[2] / "benchmarks" / "runners"
+sys.path.insert(0, str(RUNNER_DIRECTORY))
+_expert_parameters = importlib.import_module(
+    "run_quantization_compensation_search"
+)._expert_parameters
 
 
 SPECS = [
@@ -148,6 +159,25 @@ def _document() -> dict:
 
 def test_compensation_contract_accepts_complete_search() -> None:
     validate_document(_document())
+
+
+def test_compensation_runner_accepts_stacked_transformers_experts() -> None:
+    parameter = SimpleNamespace(ndim=3, shape=(64, 2, 3))
+    layers = [
+        SimpleNamespace(
+            mlp=SimpleNamespace(
+                experts=SimpleNamespace(
+                    gate_up_proj=parameter,
+                    down_proj=parameter,
+                )
+            )
+        )
+        for _ in range(16)
+    ]
+    observed = _expert_parameters(SimpleNamespace(model=SimpleNamespace(layers=layers)))
+    assert len(observed) == 32
+    assert observed[0][0] == "model.layers.0.mlp.experts.gate_up_proj"
+    assert observed[-1][0] == "model.layers.15.mlp.experts.down_proj"
 
 
 def test_compensation_contract_rejects_tampered_candidate() -> None:

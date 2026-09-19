@@ -58,16 +58,27 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _expert_parameters(model: Any) -> list[tuple[str, Any]]:
-    parameters = [
-        (name, parameter)
-        for name, parameter in model.named_parameters()
-        if ".mlp.experts." in name
-    ]
-    expected = LAYER_COUNT * EXPERT_COUNT * 3
-    if len(parameters) != expected:
-        raise RuntimeError(
-            f"expected {expected} OLMoE expert tensors, observed {len(parameters)}"
+    parameters = []
+    for layer_index, layer in enumerate(model.model.layers):
+        experts = layer.mlp.experts
+        parameters.extend(
+            (
+                (
+                    f"model.layers.{layer_index}.mlp.experts.gate_up_proj",
+                    experts.gate_up_proj,
+                ),
+                (
+                    f"model.layers.{layer_index}.mlp.experts.down_proj",
+                    experts.down_proj,
+                ),
+            )
         )
+    expected = LAYER_COUNT * 2
+    if len(parameters) != expected or any(
+        parameter.ndim != 3 or parameter.shape[0] != EXPERT_COUNT
+        for _name, parameter in parameters
+    ):
+        raise RuntimeError("unexpected stacked OLMoE expert parameter layout")
     return parameters
 
 
