@@ -498,6 +498,13 @@ def _build_parser() -> argparse.ArgumentParser:
     inspect_pack_parser.add_argument("pack", type=Path)
     inspect_pack_parser.add_argument("--output", default="-")
 
+    inspect_target_pack_parser = subparsers.add_parser(
+        "inspect-target-pack",
+        help="verify every mixed TargetPack identity, layout, encoding, and payload hash",
+    )
+    inspect_target_pack_parser.add_argument("pack", type=Path)
+    inspect_target_pack_parser.add_argument("--output", default="-")
+
     inventory_parser = subparsers.add_parser(
         "inventory-safetensors",
         help="stream-verify local Safetensors shards and hash every tensor payload",
@@ -1100,6 +1107,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .expert_pack import inspect_expert_pack
 
             document = inspect_expert_pack(arguments.pack)
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "inspect-target-pack":
+            from .target_pack import inspect_target_pack
+
+            document = inspect_target_pack(arguments.pack)
             _write_document(document, arguments.output)
             return 0
         if arguments.command == "inventory-safetensors":
