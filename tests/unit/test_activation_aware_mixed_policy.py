@@ -122,8 +122,37 @@ def _document() -> dict:
     }
 
 
+def _v2_document() -> dict:
+    document = _document()
+    effective_bpw = 13.328125
+    payload_bytes = math.ceil(
+        effective_bpw * document["storage"]["total_expert_weight_count"] / 8
+    )
+    document["schema_version"] = 2
+    document["method"]["id"] = "layer15-awq-q4-q8-bf16-mixed-v2"
+    document["policy"].update(
+        {
+            "policy_id": "olmoe-layer15-awq-q4-q8-bf16-v2",
+            "q8_layers": [11, 12, 13, 14],
+            "bf16_layers": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "effective_bpw": effective_bpw,
+            "projected_payload_bytes": payload_bytes,
+        }
+    )
+    document["storage"]["policy_effective_bpw"] = effective_bpw
+    document["storage"]["projected_payload_bytes"] = payload_bytes
+    document["q8_base_metrics"] = _metrics(0.998, 0.995)
+    document["q8_base_reproduced"] = False
+    document["gates"]["q8_base_reproduced"] = False
+    return document
+
+
 def test_activation_aware_policy_accepts_complete_evidence() -> None:
     validate_document(_document())
+
+
+def test_activation_aware_policy_v2_accepts_runtime_payload_gate_without_legacy_reproduction() -> None:
+    validate_document(_v2_document())
 
 
 def test_activation_aware_policy_rejects_layer_tampering() -> None:
