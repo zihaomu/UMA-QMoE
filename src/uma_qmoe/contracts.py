@@ -42,6 +42,7 @@ SCHEMA_BY_KIND = {
     "packed_q4_kernel_evidence": "packed_q4_kernel_evidence.schema.json",
     "public_baseline": "public_baseline.schema.json",
     "quantization_compensation_search": "quantization_compensation_search.schema.json",
+    "router_logit_compensation_search": "router_logit_compensation_search.schema.json",
     "reference_host_baseline": "reference_host_baseline.schema.json",
     "reference_oracle_comparison": "reference_oracle_comparison.schema.json",
     "reference_oracle_policy": "reference_oracle_policy.schema.json",
@@ -966,6 +967,133 @@ def validate_document(
             raise ContractError("Compensation overall gate is inconsistent")
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Compensation status is inconsistent")
+    elif kind == "router_logit_compensation_search":
+        reference = document["reference"]
+        baseline = document["all_q4_baseline"]
+        source_baseline = document["source_all_q4_baseline"]
+        storage = document["storage"]
+        rows = document["candidate_rows"]
+        quality = document["quality_gate"]
+        dataset = document["dataset"]
+        expected_specs = [
+            ("q4-baseline", "identity", None, None),
+            ("bias", "bias", None, None),
+            ("diagonal-affine", "diagonal_affine", None, None),
+            ("ridge-delta-r8-l1e-4", "ridge_delta", 8, 1e-4),
+            ("ridge-delta-r16-l1e-4", "ridge_delta", 16, 1e-4),
+            ("ridge-delta-r32-l1e-4", "ridge_delta", 32, 1e-4),
+            ("ridge-delta-full-l1e-4", "ridge_delta_full", None, 1e-4),
+        ]
+        if document["method"]["candidate_ids"] != [
+            spec[0] for spec in expected_specs
+        ] or len(rows) != len(expected_specs):
+            raise ContractError(
+                "Router compensation candidate progression is inconsistent"
+            )
+        calibration_ids = dataset["calibration_sample_ids"]
+        evaluation_ids = dataset["evaluation_sample_ids"]
+        if set(calibration_ids) & set(evaluation_ids):
+            raise ContractError("Router compensation dataset splits must be disjoint")
+        if not math.isclose(
+            reference["perplexity"],
+            math.exp(reference["nll"]),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ContractError(
+                "Router compensation reference perplexity is inconsistent"
+            )
+        _validate_quality_metrics(baseline, reference, "Router compensation baseline")
+        _validate_quality_metrics(
+            source_baseline, reference, "Router compensation source baseline"
+        )
+        expected_counts = {
+            "identity": 0,
+            "bias": 16 * 64,
+            "diagonal_affine": 16 * 64 * 2,
+            "ridge_delta": None,
+            "ridge_delta_full": 16 * (64 * 64 + 64),
+        }
+        for row, (candidate_id, transform, rank, regularization) in zip(
+            rows, expected_specs, strict=True
+        ):
+            _validate_quality_metrics(
+                row["metrics"], reference, "Router compensation candidate"
+            )
+            expected_count = expected_counts[transform]
+            if transform == "ridge_delta":
+                expected_count = 16 * (64 * rank + rank * 64 + 64)
+            expected_bytes = expected_count * 2
+            expected_effective_bpw = (
+                (storage["all_q4_pack_bytes"] + expected_bytes)
+                * 8
+                / storage["total_expert_weight_count"]
+            )
+            if (
+                row["candidate_id"] != candidate_id
+                or row["transform"] != transform
+                or row["rank"] != rank
+                or row["regularization_relative"] != regularization
+                or row["parameter_count"] != expected_count
+                or row["parameter_bytes_bf16"] != expected_bytes
+                or not math.isclose(
+                    row["projected_effective_bpw"],
+                    expected_effective_bpw,
+                    rel_tol=1e-12,
+                )
+                or row["finite"] != row["metrics"]["finite"]
+            ):
+                raise ContractError(
+                    "Router compensation candidate identity or storage is inconsistent"
+                )
+        baseline_reproduced = (
+            rows[0]["metrics"] == baseline
+            and rows[0]["calibration_router_exact_set_agreement"]
+            == document["calibration"]["all_q4_router_exact_set_agreement"]
+            and math.isclose(baseline["nll"], source_baseline["nll"], abs_tol=1e-6)
+            and math.isclose(
+                baseline["router_exact_set_agreement"],
+                source_baseline["router_exact_set_agreement"],
+                abs_tol=1e-12,
+            )
+        )
+        passing = [
+            row
+            for row in rows
+            if row["metrics"]["relative_perplexity_change"]
+            <= quality["maximum_relative_perplexity_increase"]
+            and row["metrics"]["router_exact_set_agreement"]
+            >= quality["minimum_router_exact_set_agreement"]
+        ]
+        expected_first = passing[0]["candidate_id"] if passing else None
+        if quality["first_passing_candidate_id"] != expected_first:
+            raise ContractError(
+                "Router compensation quality gate result is inconsistent"
+            )
+        gates = document["gates"]
+        expected = {
+            "source_evidence_compatible": True,
+            "dataset_identity": True,
+            "dataset_split_disjoint": not bool(
+                set(calibration_ids) & set(evaluation_ids)
+            ),
+            "reference_finite": reference["finite"],
+            "all_q4_finite": baseline["finite"],
+            "q4_baseline_reproduced": baseline_reproduced,
+            "candidate_progression": len(rows) == len(expected_specs),
+            "matrix_finite": all(row["finite"] for row in rows),
+            "quality_gate_unchanged": math.isclose(
+                quality["maximum_relative_perplexity_increase"], 0.01
+            )
+            and math.isclose(quality["minimum_router_exact_set_agreement"], 0.99),
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Router compensation gate does not match evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Router compensation overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Router compensation status is inconsistent")
     elif kind == "layer_precision_search":
         reference = document["reference"]
         sources = document["source_uniform_metrics"]
