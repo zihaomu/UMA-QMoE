@@ -45,6 +45,7 @@ SCHEMA_BY_KIND = {
     "reference_host_baseline": "reference_host_baseline.schema.json",
     "reference_oracle_comparison": "reference_oracle_comparison.schema.json",
     "reference_oracle_policy": "reference_oracle_policy.schema.json",
+    "reverse_layer_quantization_search": "reverse_layer_quantization_search.schema.json",
     "run_manifest": "run_manifest.schema.json",
     "route_trace": "route_trace.schema.json",
     "route_trace_replay": "route_trace_replay.schema.json",
@@ -1066,6 +1067,164 @@ def validate_document(
             raise ContractError("Layer precision overall gate is inconsistent")
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Layer precision status is inconsistent")
+    elif kind == "reverse_layer_quantization_search":
+        reference = document["reference"]
+        sources = document["source_uniform_metrics"]
+        searches = document["searches"]
+        storage = document["storage"]
+        quality = document["quality_gate"]
+        expected_bits = [4, 8, 12]
+        if (
+            storage["expert_weight_count_per_layer"] * 16
+            != storage["total_expert_weight_count"]
+        ):
+            raise ContractError("Reverse layer storage partition is inconsistent")
+        if [row["quantized_bits"] for row in sources] != expected_bits or [
+            row["candidate_id"] for row in sources
+        ] != ["q4-g128", "q8-g128", "q12-g128"]:
+            raise ContractError("Reverse layer source rows are inconsistent")
+        if [search["quantized_bits"] for search in searches] != expected_bits:
+            raise ContractError("Reverse layer search order is inconsistent")
+        if not math.isclose(
+            reference["perplexity"],
+            math.exp(reference["nll"]),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ContractError("Reverse layer reference perplexity is inconsistent")
+        for source in sources:
+            _validate_quality_metrics(source["metrics"], reference, "Reverse source")
+        passing_policies: list[dict[str, Any]] = []
+        endpoints_reproduced = True
+        all_layers_covered = True
+        matrix_finite = True
+        for source, search in zip(sources, searches, strict=True):
+            bits = search["quantized_bits"]
+            quantized_bpw = (
+                storage["q4_pack_effective_bpw"] if bits == 4 else bits + 0.25
+            )
+            if not math.isclose(search["quantized_effective_bpw"], quantized_bpw):
+                raise ContractError("Reverse layer base storage is inconsistent")
+            singles = search["single_layer_rows"]
+            cumulative = search["cumulative_rows"]
+            for row in singles:
+                _validate_quality_metrics(row["metrics"], reference, "Reverse single")
+                if row["finite"] != row["metrics"]["finite"]:
+                    raise ContractError("Reverse layer finite flag is inconsistent")
+            expected_ranking = [
+                row["quantized_layer"]
+                for row in sorted(
+                    singles,
+                    key=lambda row: (
+                        -row["metrics"]["router_exact_set_agreement"],
+                        row["metrics"]["relative_perplexity_change"],
+                        row["quantized_layer"],
+                    ),
+                )
+            ]
+            if search["ranking"] != expected_ranking:
+                raise ContractError("Reverse layer ranking is inconsistent")
+            quantized_layers: list[int] = []
+            qualifying: list[Mapping[str, Any]] = []
+            for index, row in enumerate(cumulative):
+                quantized_layers.append(expected_ranking[index])
+                _validate_quality_metrics(
+                    row["metrics"], reference, "Reverse cumulative"
+                )
+                effective_bpw = (
+                    16.0 - len(quantized_layers) * (16.0 - quantized_bpw) / 16
+                )
+                payload_bytes = math.ceil(
+                    effective_bpw * storage["total_expert_weight_count"] / 8
+                )
+                if (
+                    row["added_quantized_layer"] != expected_ranking[index]
+                    or row["quantized_layers"] != quantized_layers
+                    or not math.isclose(row["effective_bpw"], effective_bpw)
+                    or row["projected_payload_bytes"] != payload_bytes
+                    or row["finite"] != row["metrics"]["finite"]
+                ):
+                    raise ContractError(
+                        "Reverse layer cumulative progression is inconsistent"
+                    )
+                if (
+                    row["metrics"]["relative_perplexity_change"]
+                    <= quality["maximum_relative_perplexity_increase"]
+                    and row["metrics"]["router_exact_set_agreement"]
+                    >= quality["minimum_router_exact_set_agreement"]
+                ):
+                    qualifying.append(row)
+            expected_lowest_layers = (
+                min(qualifying, key=lambda row: row["effective_bpw"])[
+                    "quantized_layers"
+                ]
+                if qualifying
+                else None
+            )
+            if search["lowest_bpw_passing_quantized_layers"] != expected_lowest_layers:
+                raise ContractError("Reverse layer passing subset is inconsistent")
+            passing_policies.extend(
+                {
+                    "quantized_bits": bits,
+                    "quantized_layers": row["quantized_layers"],
+                    "effective_bpw": row["effective_bpw"],
+                }
+                for row in qualifying
+            )
+            endpoint = cumulative[-1]["metrics"]
+            endpoints_reproduced = (
+                endpoints_reproduced
+                and math.isclose(
+                    endpoint["nll"], source["metrics"]["nll"], abs_tol=1e-6
+                )
+                and math.isclose(
+                    endpoint["router_exact_set_agreement"],
+                    source["metrics"]["router_exact_set_agreement"],
+                    abs_tol=1e-12,
+                )
+            )
+            all_layers_covered = all_layers_covered and (
+                [row["quantized_layer"] for row in singles] == list(range(16))
+                and sorted(search["ranking"]) == list(range(16))
+                and cumulative[-1]["quantized_layers"] == search["ranking"]
+            )
+            matrix_finite = matrix_finite and all(
+                row["finite"] for row in singles + cumulative
+            )
+        expected_lowest = (
+            min(
+                passing_policies,
+                key=lambda row: (
+                    row["effective_bpw"],
+                    row["quantized_bits"],
+                    -len(row["quantized_layers"]),
+                ),
+            )
+            if passing_policies
+            else None
+        )
+        if quality["lowest_bpw_passing_policy"] != expected_lowest:
+            raise ContractError("Reverse layer lowest-bpw policy is inconsistent")
+        expected = {
+            "source_evidence_compatible": True,
+            "dataset_identity": True,
+            "reference_finite": reference["finite"],
+            "uniform_endpoints_reproduced": endpoints_reproduced,
+            "all_layers_covered": all_layers_covered,
+            "matrix_finite": matrix_finite,
+            "quality_gate_unchanged": math.isclose(
+                quality["maximum_relative_perplexity_increase"], 0.01
+            )
+            and math.isclose(quality["minimum_router_exact_set_agreement"], 0.99),
+        }
+        gates = document["gates"]
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Reverse layer gate does not match evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Reverse layer overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Reverse layer status is inconsistent")
     elif kind == "traffic_source_ledger":
         from .traffic_model import (
             TrafficModelError,
