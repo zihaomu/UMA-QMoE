@@ -23,11 +23,13 @@ from run_mixed_precision_sensitivity import (
     LAYER_COUNT,
     MODEL_ID,
     MODEL_REVISION,
+    _copy_q4_layer,
     _routes_sha256,
     _sha256_file,
     _tensor_sha256,
 )
 from uma_qmoe.contracts import canonical_sha256, validate_document
+from uma_qmoe.expert_pack import ExpertPackReader
 
 
 CANDIDATES = [
@@ -43,6 +45,9 @@ CANDIDATES = [
     ("q6-g128", 6, 128, 0),
     ("q4-g128-r16", 4, 128, 16),
     ("q8-g128", 8, 128, 0),
+    ("q9-g128", 9, 128, 0),
+    ("q10-g128", 10, 128, 0),
+    ("q12-g128", 12, 128, 0),
     ("bf16-upper-bound", 16, None, 0),
 ]
 
@@ -51,6 +56,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--expert-pack", type=Path, required=True)
+    parser.add_argument("--model-manifest-sha256", required=True)
     parser.add_argument("--route-coverage-evidence", type=Path, required=True)
     parser.add_argument("--prompt-fixture", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -109,6 +116,28 @@ def _quantize_dequantize(
             sorted=False,
         ).indices
         restored.scatter_(1, indices, groups.gather(1, indices))
+    return restored.reshape(source.shape).to(source.dtype)
+
+
+def _restore_sparse_residual(
+    source: Any,
+    base: Any,
+    *,
+    group_size: int,
+    residual_values_per_group: int,
+    torch: Any,
+) -> Any:
+    source_groups = source.float().reshape(-1, group_size)
+    restored = base.float().reshape(-1, group_size).clone()
+    residual = (source_groups - restored).abs()
+    indices = torch.topk(
+        residual,
+        k=residual_values_per_group,
+        dim=1,
+        largest=True,
+        sorted=False,
+    ).indices
+    restored.scatter_(1, indices, source_groups.gather(1, indices))
     return restored.reshape(source.shape).to(source.dtype)
 
 
@@ -211,15 +240,41 @@ def main() -> int:
     backups = [
         (parameter, parameter.detach().clone()) for _name, parameter in parameters
     ]
+    reader = ExpertPackReader(
+        args.expert_pack,
+        expected_model_id=MODEL_ID,
+        expected_model_revision=MODEL_REVISION,
+        expected_model_manifest_sha256=args.model_manifest_sha256,
+    )
+    pack_sha256 = _sha256_file(args.expert_pack)
+    if source["model"]["expert_pack_sha256"] != pack_sha256:
+        raise RuntimeError("route coverage evidence used a different ExpertPack")
+    for layer_index in range(LAYER_COUNT):
+        _copy_q4_layer(model, reader, layer_index, torch)
+    q4_backups = [(parameter, parameter.detach().clone()) for parameter, _ in backups]
     all_q4_bytes = source["storage"]["all_q4_bytes"]
     rows = []
     try:
         for candidate_id, bits, group_size, residual_count in CANDIDATES:
             print(f"evaluating {candidate_id}", flush=True)
             with torch.inference_mode():
-                for parameter, backup in backups:
+                for (parameter, backup), (_q4_parameter, q4_backup) in zip(
+                    backups, q4_backups, strict=True
+                ):
                     if group_size is None:
                         parameter.copy_(backup)
+                    elif candidate_id == "q4-g128":
+                        parameter.copy_(q4_backup)
+                    elif candidate_id.startswith("q4-g128-r"):
+                        parameter.copy_(
+                            _restore_sparse_residual(
+                                backup,
+                                q4_backup,
+                                group_size=group_size,
+                                residual_values_per_group=residual_count,
+                                torch=torch,
+                            )
+                        )
                     else:
                         parameter.copy_(
                             _quantize_dequantize(
@@ -251,7 +306,8 @@ def main() -> int:
                 }
             )
     finally:
-        del backups
+        del backups, q4_backups
+        reader.close()
 
     source_baseline = source["all_q4_baseline"]
     q4_baseline_reproduced = math.isclose(
