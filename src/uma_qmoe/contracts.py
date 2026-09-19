@@ -355,6 +355,15 @@ def validate_document(
             raise ContractError("Custom operator status is inconsistent")
     elif kind == "packed_q4_kernel_evidence":
         kernel = document["kernel"]
+        if (
+            kernel["abi"]
+            == "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2"
+            and kernel.get("execution_strategy")
+            != "two-launch-gate-up-swiglu-down-route"
+        ):
+            raise ContractError(
+                "Packed Q4 fused v2 evidence must declare its execution strategy"
+            )
         correctness = document["correctness"]
         performance = document["performance"]
         gates = document["gates"]
