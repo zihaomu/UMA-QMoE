@@ -231,14 +231,25 @@ def test_packed_q4_fused_v2_requires_execution_strategy() -> None:
     validate_document(document)
 
 
-def test_packed_q4_v3_requires_prefill_evidence() -> None:
+@pytest.mark.parametrize(
+    ("abi", "strategy"),
+    (
+        (
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3",
+            "decode-two-launch-prefill-expert-sorted-three-stage",
+        ),
+        (
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-tiled-v4",
+            "decode-two-launch-prefill-expert-tiled-three-stage",
+        ),
+    ),
+)
+def test_packed_q4_routed_abis_require_prefill_evidence(
+    abi: str, strategy: str
+) -> None:
     document = _packed_evidence()
-    document["kernel"]["abi"] = (
-        "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3"
-    )
-    document["kernel"]["execution_strategy"] = (
-        "decode-two-launch-prefill-expert-sorted-three-stage"
-    )
+    document["kernel"]["abi"] = abi
+    document["kernel"]["execution_strategy"] = strategy
     with pytest.raises(ContractError, match="prefill workload"):
         validate_document(document)
     document["workload"]["prefill_tokens"] = 4

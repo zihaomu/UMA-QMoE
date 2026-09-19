@@ -101,7 +101,7 @@ def load_native_extension(
         os.environ[arch_name] = arch_value
         try:
             extension = load(
-                name=f"uma_qmoe_packed_q4_{platform}_v3",
+                name=f"uma_qmoe_packed_q4_{platform}_v4",
                 sources=[str(path) for path in staged_sources],
                 build_directory=str(target_build),
                 extra_cflags=["-O3", "-std=c++17"],
