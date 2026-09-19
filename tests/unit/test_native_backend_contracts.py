@@ -178,12 +178,19 @@ def test_native_source_identity_is_stable_sha256() -> None:
 
 def test_native_backend_releases_closed_pack_cache() -> None:
     backend = PackedQ4NativeBackend(
-        "cuda_sm121", SimpleNamespace(q4_linear=lambda *_args: None)
+        "cuda_sm121",
+        SimpleNamespace(
+            q4_linear=lambda *_args: None,
+            q4_moe_forward=lambda *_args: None,
+        ),
     )
     backend._cache[(1, "first", "cuda:0")] = object()
     backend._cache[(2, "second", "cuda:0")] = object()
+    backend._layer_cache[(1, 0, "cuda:0")] = object()
+    backend._layer_cache[(2, 0, "cuda:0")] = object()
     backend.release_pack(1)
     assert set(backend._cache) == {(2, "second", "cuda:0")}
+    assert set(backend._layer_cache) == {(2, 0, "cuda:0")}
 
 
 def test_packed_q4_evidence_recomputes_gates_and_timing() -> None:
@@ -192,6 +199,19 @@ def test_packed_q4_evidence_recomputes_gates_and_timing() -> None:
     tampered["performance"]["median_milliseconds"] = 99.0
     with pytest.raises(ContractError, match="timing summary"):
         validate_document(tampered)
+
+
+def test_packed_q4_fused_v2_requires_execution_strategy() -> None:
+    document = _packed_evidence()
+    document["kernel"]["abi"] = (
+        "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2"
+    )
+    with pytest.raises(ContractError, match="execution strategy"):
+        validate_document(document)
+    document["kernel"]["execution_strategy"] = (
+        "two-launch-gate-up-swiglu-down-route"
+    )
+    validate_document(document)
 
 
 def test_mixed_precision_matrix_recomputes_ranking_and_deltas() -> None:
