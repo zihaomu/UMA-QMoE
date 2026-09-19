@@ -159,6 +159,24 @@ uv run umaq estimate-weight-traffic \
   --output models/estimates/olmoe_q4_group128.json
 ```
 
+Spark deliberately does not require privileged performance counters. Build the
+versioned traffic sensitivity model from the frozen source ledger, canonical Q4
+estimate, RouteTrace, unprivileged bandwidth soak, and local BF16 config:
+
+```bash
+uv run umaq build-spark-traffic-model \
+  benchmarks/sources/spark1_traffic_source_ledger_v1.json \
+  models/estimates/olmoe_q4_group128.json \
+  benchmarks/traces/olmoe_1b_7b_0125_128x32_greedy_v1.json \
+  /absolute/path/to/spark1-bandwidth-soak-v1.json \
+  /absolute/path/to/bf16-rne-v1/config.json \
+  --output /absolute/path/to/spark1-traffic-model.json
+```
+
+The report is restricted to `modeled_estimated`: its token rates are bandwidth
+ceilings over explicit amplification factors, not measured DRAM traffic or
+end-to-end throughput.
+
 Once that manifest is frozen, derive the deterministic BF16 Oracle without
 materializing a whole shard in memory. This path uses explicit
 round-to-nearest-even, preserves NaNs, resumes compatible shard `.part` files,

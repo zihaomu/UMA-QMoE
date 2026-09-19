@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/spark_traffic_model.schema.json",
+  "title": "UMA-QMoE SparkTrafficModel v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "generated_at", "target_id", "status", "result_class", "inputs", "workload", "components", "bandwidth", "sensitivity", "assumptions", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "spark_traffic_model" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "target_id": { "const": "spark1" },
+    "status": { "enum": ["passed", "failed"] },
+    "result_class": { "const": "modeled_estimated" },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_ledger", "weight_traffic_estimate", "route_trace", "bandwidth_soak", "model_config"],
+      "properties": {
+        "source_ledger": { "$ref": "#/$defs/contractIdentity" },
+        "weight_traffic_estimate": { "$ref": "#/$defs/contractIdentity" },
+        "route_trace": { "$ref": "#/$defs/contractIdentity" },
+        "bandwidth_soak": { "$ref": "#/$defs/contractIdentity" },
+        "model_config": { "$ref": "#/$defs/fileIdentity" }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["batch_size", "prompt_tokens", "output_tokens", "decode_steps", "minimum_past_tokens", "maximum_past_tokens", "mean_past_tokens"],
+      "properties": {
+        "batch_size": { "const": 1 },
+        "prompt_tokens": { "type": "integer", "minimum": 1 },
+        "output_tokens": { "type": "integer", "minimum": 2 },
+        "decode_steps": { "type": "integer", "minimum": 1 },
+        "minimum_past_tokens": { "type": "integer", "minimum": 1 },
+        "maximum_past_tokens": { "type": "integer", "minimum": 1 },
+        "mean_past_tokens": { "type": "number", "minimum": 1 }
+      }
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dense_weight_bytes_per_token", "expert_payload_bytes_per_token", "expert_metadata_bytes_per_token", "expert_alignment_bytes_per_token", "kv_read_bytes_per_token", "kv_write_bytes_per_token", "activation_workspace_bytes_per_token", "activation_workspace_treatment", "algorithmic_minimum_bytes_per_token"],
+      "properties": {
+        "dense_weight_bytes_per_token": { "type": "integer", "minimum": 0 },
+        "expert_payload_bytes_per_token": { "type": "integer", "minimum": 0 },
+        "expert_metadata_bytes_per_token": { "type": "integer", "minimum": 0 },
+        "expert_alignment_bytes_per_token": { "type": "integer", "minimum": 0 },
+        "kv_read_bytes_per_token": { "type": "integer", "minimum": 0 },
+        "kv_write_bytes_per_token": { "type": "integer", "minimum": 0 },
+        "activation_workspace_bytes_per_token": { "const": 0 },
+        "activation_workspace_treatment": { "const": "unmeasured_excluded_from_minimum_and_covered_by_amplification_sensitivity" },
+        "algorithmic_minimum_bytes_per_token": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "bandwidth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["official_spec_gbps", "local_read_p50_algorithmic_gbps", "local_measurement_is_dram_counter"],
+      "properties": {
+        "official_spec_gbps": { "type": "number", "exclusiveMinimum": 0 },
+        "local_read_p50_algorithmic_gbps": { "type": "number", "exclusiveMinimum": 0 },
+        "local_measurement_is_dram_counter": { "const": false }
+      }
+    },
+    "sensitivity": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["amplification_factor", "modeled_bytes_per_token", "local_bandwidth_ceiling_tokens_per_second", "official_spec_ceiling_tokens_per_second"],
+        "properties": {
+          "amplification_factor": { "type": "number", "minimum": 1 },
+          "modeled_bytes_per_token": { "type": "number", "exclusiveMinimum": 0 },
+          "local_bandwidth_ceiling_tokens_per_second": { "type": "number", "exclusiveMinimum": 0 },
+          "official_spec_ceiling_tokens_per_second": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "minItems": 4,
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_ledger_frozen", "inputs_hash_bound", "route_workload_bound", "component_formula_consistent", "sensitivity_formula_consistent", "privileged_counter_not_used", "no_measured_dram_claim", "overall_passed"],
+      "properties": {
+        "source_ledger_frozen": { "type": "boolean" },
+        "inputs_hash_bound": { "type": "boolean" },
+        "route_workload_bound": { "type": "boolean" },
+        "component_formula_consistent": { "type": "boolean" },
+        "sensitivity_formula_consistent": { "type": "boolean" },
+        "privileged_counter_not_used": { "type": "boolean" },
+        "no_measured_dram_claim": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "file_sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "contractIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "file_sha256", "semantic_sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "semantic_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}
