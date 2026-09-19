@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/quantization_compensation_search.schema.json",
+  "title": "UMA-QMoE QuantizationCompensationSearch v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "method", "dataset", "reference", "source_all_q4_baseline", "storage", "candidate_rows", "quality_gate", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "quantization_compensation_search" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "enum": ["halo3", "spark1"] },
+    "status": { "enum": ["passed", "failed"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision", "expert_pack_sha256"],
+      "properties": {
+        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" },
+        "expert_pack_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "diagnostic_only", "materializes_expert_parameters", "performance_evidence", "source_route_coverage_evidence", "prompt_fixture", "candidate_ids"],
+      "properties": {
+        "id": { "const": "expert-weight-qformat-compensation-v1" },
+        "diagnostic_only": { "const": true },
+        "materializes_expert_parameters": { "const": true },
+        "performance_evidence": { "const": false },
+        "source_route_coverage_evidence": { "$ref": "#/$defs/identity" },
+        "prompt_fixture": { "$ref": "#/$defs/identity" },
+        "candidate_ids": {
+          "type": "array", "minItems": 16, "maxItems": 16,
+          "prefixItems": [
+            { "const": "q4-g128" }, { "const": "q4-g128-r1" }, { "const": "q4-g64" }, { "const": "q4-g128-r2" },
+            { "const": "q4-g32" }, { "const": "q4-g128-r4" }, { "const": "q5-g128" }, { "const": "q4-g128-r8" },
+            { "const": "q4-g16" }, { "const": "q6-g128" }, { "const": "q4-g128-r16" }, { "const": "q8-g128" },
+            { "const": "q9-g128" }, { "const": "q10-g128" }, { "const": "q12-g128" }, { "const": "bf16-upper-bound" }
+          ],
+          "items": false
+        }
+      }
+    },
+    "dataset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sample_ids", "prompt_token_count", "target_token_count"],
+      "properties": {
+        "sample_ids": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "prompt_token_count": { "type": "integer", "minimum": 2 },
+        "target_token_count": { "type": "integer", "minimum": 2 }
+      }
+    },
+    "reference": { "$ref": "#/$defs/reference" },
+    "source_all_q4_baseline": { "$ref": "#/$defs/metrics" },
+    "storage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["total_expert_weight_count", "all_q4_pack_bytes", "all_q4_pack_effective_bpw"],
+      "properties": {
+        "total_expert_weight_count": { "type": "integer", "minimum": 1 },
+        "all_q4_pack_bytes": { "type": "integer", "minimum": 1 },
+        "all_q4_pack_effective_bpw": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "candidate_rows": {
+      "type": "array", "minItems": 16, "maxItems": 16,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["candidate_id", "bits", "group_size", "residual_values_per_group", "metrics", "primary_bpw", "scale_bpw", "residual_bpw", "effective_bpw", "projected_payload_bytes", "finite"],
+        "properties": {
+          "candidate_id": { "type": "string", "minLength": 1 },
+          "bits": { "enum": [4, 5, 6, 8, 9, 10, 12, 16] },
+          "group_size": { "oneOf": [{ "type": "null" }, { "enum": [16, 32, 64, 128] }] },
+          "residual_values_per_group": { "type": "integer", "minimum": 0, "maximum": 16 },
+          "metrics": { "$ref": "#/$defs/metrics" },
+          "primary_bpw": { "type": "number", "minimum": 0 },
+          "scale_bpw": { "type": "number", "minimum": 0 },
+          "residual_bpw": { "type": "number", "minimum": 0 },
+          "effective_bpw": { "type": "number", "exclusiveMinimum": 0 },
+          "projected_payload_bytes": { "type": "integer", "minimum": 1 },
+          "finite": { "type": "boolean" }
+        }
+      }
+    },
+    "quality_gate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maximum_relative_perplexity_increase", "minimum_router_exact_set_agreement", "first_passing_candidate_id"],
+      "properties": {
+        "maximum_relative_perplexity_increase": { "const": 0.01 },
+        "minimum_router_exact_set_agreement": { "const": 0.99 },
+        "first_passing_candidate_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] }
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_evidence_compatible", "dataset_identity", "reference_finite", "candidate_progression", "matrix_finite", "q4_baseline_reproduced", "bf16_upper_bound", "quality_gate_unchanged", "overall_passed"],
+      "properties": {
+        "source_evidence_compatible": { "type": "boolean" },
+        "dataset_identity": { "type": "boolean" },
+        "reference_finite": { "type": "boolean" },
+        "candidate_progression": { "type": "boolean" },
+        "matrix_finite": { "type": "boolean" },
+        "q4_baseline_reproduced": { "type": "boolean" },
+        "bf16_upper_bound": { "type": "boolean" },
+        "quality_gate_unchanged": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identity": { "type": "object", "additionalProperties": false, "required": ["file_sha256", "semantic_sha256"], "properties": { "file_sha256": { "$ref": "#/$defs/sha256" }, "semantic_sha256": { "$ref": "#/$defs/sha256" } } },
+    "reference": { "type": "object", "additionalProperties": false, "required": ["finite", "nll", "perplexity", "logits_sha256", "routes_sha256"], "properties": { "finite": { "type": "boolean" }, "nll": { "type": "number", "minimum": 0 }, "perplexity": { "type": "number", "minimum": 1 }, "logits_sha256": { "$ref": "#/$defs/sha256" }, "routes_sha256": { "$ref": "#/$defs/sha256" } } },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finite", "nll", "perplexity", "relative_nll_change", "relative_perplexity_change", "top1_agreement", "logit_max_absolute_error", "logit_p99_absolute_error", "logit_cosine_similarity", "router_exact_set_agreement", "router_mean_set_overlap", "per_layer_router_exact_set_agreement"],
+      "properties": {
+        "finite": { "type": "boolean" }, "nll": { "type": "number", "minimum": 0 }, "perplexity": { "type": "number", "minimum": 1 },
+        "relative_nll_change": { "type": "number" }, "relative_perplexity_change": { "type": "number" },
+        "top1_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
+        "logit_max_absolute_error": { "type": "number", "minimum": 0 }, "logit_p99_absolute_error": { "type": "number", "minimum": 0 },
+        "logit_cosine_similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+        "router_exact_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 }, "router_mean_set_overlap": { "type": "number", "minimum": 0, "maximum": 1 },
+        "per_layer_router_exact_set_agreement": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "number", "minimum": 0, "maximum": 1 } }
+      }
+    }
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/router_logit_compensation_search.schema.json",
+  "title": "UMA-QMoE RouterLogitCompensationSearch v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "method", "dataset", "reference", "source_all_q4_baseline", "all_q4_baseline", "calibration", "storage", "candidate_rows", "quality_gate", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "router_logit_compensation_search" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "enum": ["halo3", "spark1"] },
+    "status": { "enum": ["passed", "failed"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision", "expert_pack_sha256"],
+      "properties": {
+        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" },
+        "expert_pack_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "diagnostic_only", "materializes_expert_parameters", "performance_evidence", "source_route_coverage_evidence", "prompt_fixture", "candidate_ids"],
+      "properties": {
+        "id": { "const": "post-q4-router-logit-calibration-v1" },
+        "diagnostic_only": { "const": true },
+        "materializes_expert_parameters": { "const": true },
+        "performance_evidence": { "const": false },
+        "source_route_coverage_evidence": { "$ref": "#/$defs/identity" },
+        "prompt_fixture": { "$ref": "#/$defs/identity" },
+        "candidate_ids": {
+          "type": "array", "minItems": 7, "maxItems": 7,
+          "prefixItems": [
+            { "const": "q4-baseline" },
+            { "const": "bias" },
+            { "const": "diagonal-affine" },
+            { "const": "ridge-delta-r8-l1e-4" },
+            { "const": "ridge-delta-r16-l1e-4" },
+            { "const": "ridge-delta-r32-l1e-4" },
+            { "const": "ridge-delta-full-l1e-4" }
+          ],
+          "items": false
+        }
+      }
+    },
+    "dataset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["calibration_sample_ids", "evaluation_sample_ids", "calibration_router_token_count", "evaluation_prompt_token_count", "evaluation_target_token_count"],
+      "properties": {
+        "calibration_sample_ids": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "evaluation_sample_ids": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "calibration_router_token_count": { "type": "integer", "minimum": 2 },
+        "evaluation_prompt_token_count": { "type": "integer", "minimum": 2 },
+        "evaluation_target_token_count": { "type": "integer", "minimum": 2 }
+      }
+    },
+    "reference": { "$ref": "#/$defs/reference" },
+    "source_all_q4_baseline": { "$ref": "#/$defs/metrics" },
+    "all_q4_baseline": { "$ref": "#/$defs/metrics" },
+    "calibration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference_router_logits_sha256", "all_q4_router_logits_sha256", "all_q4_router_exact_set_agreement"],
+      "properties": {
+        "reference_router_logits_sha256": { "$ref": "#/$defs/sha256" },
+        "all_q4_router_logits_sha256": { "$ref": "#/$defs/sha256" },
+        "all_q4_router_exact_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "storage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["total_expert_weight_count", "all_q4_pack_bytes", "all_q4_pack_effective_bpw"],
+      "properties": {
+        "total_expert_weight_count": { "type": "integer", "minimum": 1 },
+        "all_q4_pack_bytes": { "type": "integer", "minimum": 1 },
+        "all_q4_pack_effective_bpw": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "candidate_rows": {
+      "type": "array", "minItems": 7, "maxItems": 7,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["candidate_id", "transform", "rank", "regularization_relative", "parameter_count", "parameter_bytes_bf16", "projected_effective_bpw", "calibration_router_exact_set_agreement", "metrics", "finite"],
+        "properties": {
+          "candidate_id": { "type": "string", "minLength": 1 },
+          "transform": { "enum": ["identity", "bias", "diagonal_affine", "ridge_delta", "ridge_delta_full"] },
+          "rank": { "oneOf": [{ "type": "null" }, { "enum": [8, 16, 32] }] },
+          "regularization_relative": { "oneOf": [{ "type": "null" }, { "type": "number", "exclusiveMinimum": 0 }] },
+          "parameter_count": { "type": "integer", "minimum": 0 },
+          "parameter_bytes_bf16": { "type": "integer", "minimum": 0 },
+          "projected_effective_bpw": { "type": "number", "exclusiveMinimum": 0 },
+          "calibration_router_exact_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
+          "metrics": { "$ref": "#/$defs/metrics" },
+          "finite": { "type": "boolean" }
+        }
+      }
+    },
+    "quality_gate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maximum_relative_perplexity_increase", "minimum_router_exact_set_agreement", "first_passing_candidate_id"],
+      "properties": {
+        "maximum_relative_perplexity_increase": { "const": 0.01 },
+        "minimum_router_exact_set_agreement": { "const": 0.99 },
+        "first_passing_candidate_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] }
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_evidence_compatible", "dataset_identity", "dataset_split_disjoint", "reference_finite", "all_q4_finite", "q4_baseline_reproduced", "candidate_progression", "matrix_finite", "quality_gate_unchanged", "overall_passed"],
+      "properties": {
+        "source_evidence_compatible": { "type": "boolean" },
+        "dataset_identity": { "type": "boolean" },
+        "dataset_split_disjoint": { "type": "boolean" },
+        "reference_finite": { "type": "boolean" },
+        "all_q4_finite": { "type": "boolean" },
+        "q4_baseline_reproduced": { "type": "boolean" },
+        "candidate_progression": { "type": "boolean" },
+        "matrix_finite": { "type": "boolean" },
+        "quality_gate_unchanged": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identity": { "type": "object", "additionalProperties": false, "required": ["file_sha256", "semantic_sha256"], "properties": { "file_sha256": { "$ref": "#/$defs/sha256" }, "semantic_sha256": { "$ref": "#/$defs/sha256" } } },
+    "reference": { "type": "object", "additionalProperties": false, "required": ["finite", "nll", "perplexity", "logits_sha256", "routes_sha256"], "properties": { "finite": { "type": "boolean" }, "nll": { "type": "number", "minimum": 0 }, "perplexity": { "type": "number", "minimum": 1 }, "logits_sha256": { "$ref": "#/$defs/sha256" }, "routes_sha256": { "$ref": "#/$defs/sha256" } } },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finite", "nll", "perplexity", "relative_nll_change", "relative_perplexity_change", "top1_agreement", "logit_max_absolute_error", "logit_p99_absolute_error", "logit_cosine_similarity", "router_exact_set_agreement", "router_mean_set_overlap", "per_layer_router_exact_set_agreement"],
+      "properties": {
+        "finite": { "type": "boolean" }, "nll": { "type": "number", "minimum": 0 }, "perplexity": { "type": "number", "minimum": 1 },
+        "relative_nll_change": { "type": "number" }, "relative_perplexity_change": { "type": "number" },
+        "top1_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
+        "logit_max_absolute_error": { "type": "number", "minimum": 0 }, "logit_p99_absolute_error": { "type": "number", "minimum": 0 },
+        "logit_cosine_similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+        "router_exact_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 }, "router_mean_set_overlap": { "type": "number", "minimum": 0, "maximum": 1 },
+        "per_layer_router_exact_set_agreement": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "number", "minimum": 0, "maximum": 1 } }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+schema_version: 1
+kind: reference_oracle_policy
+policy_id: olmoe_q4_group128_halo3_full_model_v1
+status: frozen
+model_id: allenai/OLMoE-1B-7B-0125
+model_revision: 9b0c1aa87e34a20052389dce1f0cf01da783f654
+scope: {level: full_model, layer_index: null, expert_index: null}
+calibration:
+  reference_target: halo3-gfx1151-bf16
+  candidate_target: halo3-gfx1151-q4-group128-compressed-host
+  evidence_semantic_sha256: 48bf6f11ecbe41b27560b4ca3e58748dd122f822e493b495ed08695b2fb9afe5
+  margin_rule: Rounded envelope above the corrected full-model Q4 capture with deterministic non-persistent RoPE buffers; the exact Top-8 threshold is a regression floor, not a task-quality claim.
+policy:
+  status: frozen
+  percentile_method: nearest_rank
+  relative_error_epsilon: 0.0001
+  max_absolute_error: 1.2
+  max_relative_error: 4000.0
+  max_p99_absolute_error: 0.7
+  max_p99_relative_error: 2.5
+  min_cosine_similarity: 0.998
+  min_router_top_k_set_agreement: 0.63

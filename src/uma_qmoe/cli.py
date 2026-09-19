@@ -161,6 +161,36 @@ def _build_parser() -> argparse.ArgumentParser:
     oracle_smoke_parser.add_argument("--target-id", required=True)
     oracle_smoke_parser.add_argument("--output", default="-")
 
+    reference_oracle_parser = subparsers.add_parser(
+        "compare-reference-oracle",
+        help="compare fixed single-expert, MoE-layer, or full-model tensor streams",
+    )
+    reference_oracle_parser.add_argument("reference_stream", type=Path)
+    reference_oracle_parser.add_argument("candidate_stream", type=Path)
+    reference_oracle_parser.add_argument("--oracle-id", required=True)
+    reference_oracle_parser.add_argument("--model-revision", required=True)
+    reference_oracle_parser.add_argument(
+        "--level",
+        choices=("single_expert", "single_moe_layer", "full_model"),
+        required=True,
+    )
+    reference_oracle_parser.add_argument("--layer-index", type=int)
+    reference_oracle_parser.add_argument("--expert-index", type=int)
+    reference_oracle_parser.add_argument("--fixture-id", required=True)
+    reference_oracle_parser.add_argument("--fixture-sha256", required=True)
+    reference_oracle_parser.add_argument("--reference-id", required=True)
+    reference_oracle_parser.add_argument("--reference-precision", required=True)
+    reference_oracle_parser.add_argument("--reference-artifact-sha256", required=True)
+    reference_oracle_parser.add_argument("--candidate-id", required=True)
+    reference_oracle_parser.add_argument("--candidate-precision", required=True)
+    reference_oracle_parser.add_argument("--candidate-artifact-sha256", required=True)
+    reference_oracle_parser.add_argument(
+        "--quality-policy",
+        type=Path,
+        help="optional JSON/YAML draft or frozen numerical threshold policy",
+    )
+    reference_oracle_parser.add_argument("--output", default="-")
+
     bandwidth_parser = subparsers.add_parser(
         "benchmark-memory-bandwidth",
         help="measure provisional GPU read/write/copy bandwidth on local UMA memory",
@@ -198,6 +228,32 @@ def _build_parser() -> argparse.ArgumentParser:
     allocation_parser.add_argument("--warmup", type=int, default=3)
     allocation_parser.add_argument("--iterations", type=int, default=10)
     allocation_parser.add_argument("--output", default="-")
+
+    allocation_v2_parser = subparsers.add_parser(
+        "benchmark-allocation-matrix-v2",
+        help="compile and measure native UMA paths at progressive pressure points",
+    )
+    allocation_v2_parser.add_argument("source", type=Path)
+    allocation_v2_parser.add_argument("--target-id", required=True)
+    allocation_v2_parser.add_argument(
+        "--backend", choices=("cuda", "hip"), required=True
+    )
+    allocation_v2_parser.add_argument("--arch", required=True)
+    allocation_v2_parser.add_argument(
+        "--buffer-mib",
+        type=int,
+        action="append",
+        dest="buffer_mib",
+        help="pressure point in MiB; repeat for a strictly increasing sequence",
+    )
+    allocation_v2_parser.add_argument("--warmup", type=int, default=3)
+    allocation_v2_parser.add_argument("--iterations", type=int, default=10)
+    allocation_v2_parser.add_argument("--inner-loops", type=int, default=1)
+    allocation_v2_parser.add_argument("--maximum-cv", type=float, default=0.03)
+    allocation_v2_parser.add_argument(
+        "--native-timeout-seconds", type=float, default=1800.0
+    )
+    allocation_v2_parser.add_argument("--output", default="-")
 
     allocation_capability_parser = subparsers.add_parser(
         "probe-native-allocation-capabilities",
@@ -253,6 +309,203 @@ def _build_parser() -> argparse.ArgumentParser:
     budget_parser.add_argument("--decision-record", default="")
     budget_parser.add_argument("--output", default="-")
 
+    public_baseline_parser = subparsers.add_parser(
+        "normalize-public-baseline",
+        help="normalize one offline vLLM serving run into baseline evidence",
+    )
+    public_baseline_parser.add_argument("run_directory", type=Path)
+    public_baseline_parser.add_argument("--target-id", required=True)
+    public_baseline_parser.add_argument("--implementation-version", required=True)
+    public_baseline_parser.add_argument("--source-commit", required=True)
+    public_baseline_parser.add_argument(
+        "--backend", choices=("cuda", "hip"), required=True
+    )
+    public_baseline_parser.add_argument("--container-image", required=True)
+    public_baseline_parser.add_argument("--model-id", required=True)
+    public_baseline_parser.add_argument("--model-revision", required=True)
+    public_baseline_parser.add_argument("--derivation-semantic-sha256", required=True)
+    public_baseline_parser.add_argument("--input-tokens", type=int, required=True)
+    public_baseline_parser.add_argument("--output-tokens", type=int, required=True)
+    public_baseline_parser.add_argument("--warmup-requests", type=int, required=True)
+    public_baseline_parser.add_argument("--measured-requests", type=int, required=True)
+    public_baseline_parser.add_argument("--max-concurrency", type=int, required=True)
+    public_baseline_parser.add_argument("--output", default="-")
+
+    baseline_run_parser = subparsers.add_parser(
+        "build-public-baseline-run-manifest",
+        help="bind normalized baseline evidence and raw files into RunManifest v1",
+    )
+    baseline_run_parser.add_argument("baseline", type=Path)
+    baseline_run_parser.add_argument("run_directory", type=Path)
+    baseline_run_parser.add_argument("--run-id", required=True)
+    baseline_run_parser.add_argument("--git-commit", required=True)
+    baseline_run_parser.add_argument("--git-dirty", action="store_true")
+    baseline_run_parser.add_argument("--dirty-patch-sha256")
+    baseline_run_parser.add_argument("--machine-baseline-sha256", required=True)
+    baseline_run_parser.add_argument("--benchmark-contract-sha256", required=True)
+    baseline_run_parser.add_argument("--model-manifest-sha256", required=True)
+    baseline_run_parser.add_argument("--output", default="-")
+
+    external_baseline_parser = subparsers.add_parser(
+        "normalize-external-baseline",
+        help="normalize an isolated third-party run into ExternalBaseline v1",
+    )
+    external_baseline_parser.add_argument("run_directory", type=Path)
+    external_baseline_parser.add_argument("--target-id", required=True)
+    external_baseline_parser.add_argument("--implementation-name", required=True)
+    external_baseline_parser.add_argument("--implementation-version", required=True)
+    external_baseline_parser.add_argument("--source-commit", required=True)
+    external_baseline_parser.add_argument(
+        "--backend", choices=("cuda", "hip", "cpu"), required=True
+    )
+    external_baseline_parser.add_argument("--container-image", required=True)
+    external_baseline_parser.add_argument("--model-id", required=True)
+    external_baseline_parser.add_argument("--model-revision", required=True)
+    external_baseline_parser.add_argument(
+        "--derivation-semantic-sha256", required=True
+    )
+    external_baseline_parser.add_argument("--input-tokens", type=int, required=True)
+    external_baseline_parser.add_argument("--output-tokens", type=int, required=True)
+    external_baseline_parser.add_argument(
+        "--warmup-requests", type=int, required=True
+    )
+    external_baseline_parser.add_argument(
+        "--measured-requests", type=int, required=True
+    )
+    external_baseline_parser.add_argument(
+        "--max-concurrency", type=int, required=True
+    )
+    external_baseline_parser.add_argument("--output", default="-")
+
+    external_run_parser = subparsers.add_parser(
+        "build-external-baseline-run-manifest",
+        help="bind ExternalBaseline evidence and raw files into RunManifest v1",
+    )
+    external_run_parser.add_argument("baseline", type=Path)
+    external_run_parser.add_argument("run_directory", type=Path)
+    external_run_parser.add_argument("--run-id", required=True)
+    external_run_parser.add_argument("--git-commit", required=True)
+    external_run_parser.add_argument("--git-dirty", action="store_true")
+    external_run_parser.add_argument("--dirty-patch-sha256")
+    external_run_parser.add_argument("--machine-baseline-sha256", required=True)
+    external_run_parser.add_argument("--benchmark-contract-sha256", required=True)
+    external_run_parser.add_argument("--model-manifest-sha256", required=True)
+    external_run_parser.add_argument("--output", default="-")
+
+    reference_host_parser = subparsers.add_parser(
+        "normalize-reference-host-baseline",
+        help="normalize the fixed offline PyTorch/HF host baseline",
+    )
+    reference_host_parser.add_argument("run_directory", type=Path)
+    reference_host_parser.add_argument("--target-id", required=True)
+    reference_host_parser.add_argument("--source-commit", required=True)
+    reference_host_parser.add_argument(
+        "--backend", choices=("cuda", "hip"), required=True
+    )
+    reference_host_parser.add_argument("--container-image", required=True)
+    reference_host_parser.add_argument("--model-id", required=True)
+    reference_host_parser.add_argument("--model-revision", required=True)
+    reference_host_parser.add_argument(
+        "--derivation-semantic-sha256", required=True
+    )
+    reference_host_parser.add_argument("--input-tokens", type=int, required=True)
+    reference_host_parser.add_argument("--output-tokens", type=int, required=True)
+    reference_host_parser.add_argument("--warmup-requests", type=int, required=True)
+    reference_host_parser.add_argument("--measured-requests", type=int, required=True)
+    reference_host_parser.add_argument("--output", default="-")
+
+    reference_host_run_parser = subparsers.add_parser(
+        "build-reference-host-run-manifest",
+        help="bind ReferenceHostBaseline evidence and raw files into RunManifest v1",
+    )
+    reference_host_run_parser.add_argument("baseline", type=Path)
+    reference_host_run_parser.add_argument("run_directory", type=Path)
+    reference_host_run_parser.add_argument("--run-id", required=True)
+    reference_host_run_parser.add_argument("--git-commit", required=True)
+    reference_host_run_parser.add_argument("--git-dirty", action="store_true")
+    reference_host_run_parser.add_argument("--dirty-patch-sha256")
+    reference_host_run_parser.add_argument("--machine-baseline-sha256", required=True)
+    reference_host_run_parser.add_argument("--benchmark-contract-sha256", required=True)
+    reference_host_run_parser.add_argument("--model-manifest-sha256", required=True)
+    reference_host_run_parser.add_argument("--output", default="-")
+
+    compressed_host_parser = subparsers.add_parser(
+        "normalize-compressed-host-baseline",
+        help="normalize the fixed packed native UMA-QMoE host baseline",
+    )
+    compressed_host_parser.add_argument("run_directory", type=Path)
+    compressed_host_parser.add_argument("--target-id", required=True)
+    compressed_host_parser.add_argument("--source-commit", required=True)
+    compressed_host_parser.add_argument(
+        "--backend", choices=("cuda", "hip"), required=True
+    )
+    compressed_host_parser.add_argument("--container-image", required=True)
+    compressed_host_parser.add_argument("--model-id", required=True)
+    compressed_host_parser.add_argument("--model-revision", required=True)
+    compressed_host_parser.add_argument("--expert-pack-sha256", required=True)
+    compressed_host_parser.add_argument("--target-policy-id")
+    compressed_host_parser.add_argument("--input-tokens", type=int, required=True)
+    compressed_host_parser.add_argument("--output-tokens", type=int, required=True)
+    compressed_host_parser.add_argument(
+        "--warmup-requests", type=int, required=True
+    )
+    compressed_host_parser.add_argument(
+        "--measured-requests", type=int, required=True
+    )
+    compressed_host_parser.add_argument(
+        "--safe-uma-budget-bytes", type=int, default=32 * 1024**3
+    )
+    compressed_host_parser.add_argument("--output", default="-")
+
+    compressed_host_run_parser = subparsers.add_parser(
+        "build-compressed-host-run-manifest",
+        help="bind CompressedHostBaseline evidence and raw files into RunManifest v1",
+    )
+    compressed_host_run_parser.add_argument("baseline", type=Path)
+    compressed_host_run_parser.add_argument("run_directory", type=Path)
+    compressed_host_run_parser.add_argument("--run-id", required=True)
+    compressed_host_run_parser.add_argument("--git-commit", required=True)
+    compressed_host_run_parser.add_argument("--git-dirty", action="store_true")
+    compressed_host_run_parser.add_argument("--dirty-patch-sha256")
+    compressed_host_run_parser.add_argument(
+        "--machine-baseline-sha256", required=True
+    )
+    compressed_host_run_parser.add_argument(
+        "--benchmark-contract-sha256", required=True
+    )
+    compressed_host_run_parser.add_argument("--model-manifest-sha256", required=True)
+    compressed_host_run_parser.add_argument("--route-trace-sha256", required=True)
+    compressed_host_run_parser.add_argument("--output", default="-")
+
+    route_trace_parser = subparsers.add_parser(
+        "build-route-trace",
+        help="normalize a fixed OLMoE capture into frozen RouteTrace v1",
+    )
+    route_trace_parser.add_argument("capture", type=Path)
+    route_trace_parser.add_argument("--trace-id", required=True)
+    route_trace_parser.add_argument("--output", default="-")
+
+    replay_trace_parser = subparsers.add_parser(
+        "replay-route-trace",
+        help="validate and fully traverse a RouteTrace in replay order",
+    )
+    replay_trace_parser.add_argument("trace", type=Path)
+    replay_trace_parser.add_argument("--output", default="-")
+
+    inspect_pack_parser = subparsers.add_parser(
+        "inspect-expert-pack",
+        help="verify every ExpertPack header, identity, layout, and payload hash",
+    )
+    inspect_pack_parser.add_argument("pack", type=Path)
+    inspect_pack_parser.add_argument("--output", default="-")
+
+    inspect_target_pack_parser = subparsers.add_parser(
+        "inspect-target-pack",
+        help="verify every mixed TargetPack identity, layout, encoding, and payload hash",
+    )
+    inspect_target_pack_parser.add_argument("pack", type=Path)
+    inspect_target_pack_parser.add_argument("--output", default="-")
+
     inventory_parser = subparsers.add_parser(
         "inventory-safetensors",
         help="stream-verify local Safetensors shards and hash every tensor payload",
@@ -275,6 +528,20 @@ def _build_parser() -> argparse.ArgumentParser:
     traffic_parser.add_argument("--zero-point-bytes", type=int, default=0)
     traffic_parser.add_argument("--tensor-alignment", type=int, default=128)
     traffic_parser.add_argument("--output", default="-")
+
+    spark_traffic_parser = subparsers.add_parser(
+        "build-spark-traffic-model",
+        help="build a counter-free modeled/estimated Spark traffic sensitivity report",
+    )
+    spark_traffic_parser.add_argument("source_ledger", type=Path)
+    spark_traffic_parser.add_argument("weight_traffic", type=Path)
+    spark_traffic_parser.add_argument("route_trace", type=Path)
+    spark_traffic_parser.add_argument("bandwidth_soak", type=Path)
+    spark_traffic_parser.add_argument("model_config", type=Path)
+    spark_traffic_parser.add_argument(
+        "--amplification-factor", type=float, action="append", dest="factors"
+    )
+    spark_traffic_parser.add_argument("--output", default="-")
     return parser
 
 
@@ -475,6 +742,56 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _write_document(document, arguments.output)
             return 0
+        if arguments.command == "compare-reference-oracle":
+            from .reference_oracle import build_reference_oracle_comparison
+
+            quality_policy = None
+            if arguments.quality_policy is not None:
+                policy_document = load_document(arguments.quality_policy)
+                if policy_document.get("kind") == "reference_oracle_policy":
+                    validate_document(policy_document)
+                    requested_scope = {
+                        "level": arguments.level,
+                        "layer_index": arguments.layer_index,
+                        "expert_index": arguments.expert_index,
+                    }
+                    if policy_document["scope"] != requested_scope:
+                        raise ContractError(
+                            "ReferenceOraclePolicy scope does not match comparison"
+                        )
+                    if policy_document["model_revision"] != arguments.model_revision:
+                        raise ContractError(
+                            "ReferenceOraclePolicy model revision does not match comparison"
+                        )
+                    quality_policy = policy_document["policy"]
+                else:
+                    quality_policy = policy_document
+            document = build_reference_oracle_comparison(
+                arguments.reference_stream,
+                arguments.candidate_stream,
+                oracle_id=arguments.oracle_id,
+                model_revision=arguments.model_revision,
+                scope={
+                    "level": arguments.level,
+                    "layer_index": arguments.layer_index,
+                    "expert_index": arguments.expert_index,
+                },
+                fixture_id=arguments.fixture_id,
+                fixture_sha256=arguments.fixture_sha256,
+                reference_implementation={
+                    "id": arguments.reference_id,
+                    "precision": arguments.reference_precision,
+                    "artifact_sha256": arguments.reference_artifact_sha256,
+                },
+                candidate_implementation={
+                    "id": arguments.candidate_id,
+                    "precision": arguments.candidate_precision,
+                    "artifact_sha256": arguments.candidate_artifact_sha256,
+                },
+                quality_policy=quality_policy,
+            )
+            _write_document(document, arguments.output)
+            return 0
         if arguments.command == "benchmark-memory-bandwidth":
             from .memory_bandwidth import benchmark_memory_bandwidth
 
@@ -509,6 +826,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 requested_buffer_bytes=arguments.buffer_mib * 1024 * 1024,
                 warmup_iterations=arguments.warmup,
                 measured_iterations=arguments.iterations,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "benchmark-allocation-matrix-v2":
+            from .allocation_matrix_v2 import benchmark_allocation_matrix_v2
+
+            source_path = arguments.source.resolve()
+            project_root = find_project_root(source_path)
+            try:
+                source_relative = source_path.relative_to(project_root).as_posix()
+            except ValueError as exc:
+                raise ContractError(
+                    "Allocation Matrix v2 source must be inside project root"
+                ) from exc
+            buffer_mib = arguments.buffer_mib or [256, 1024, 4096, 8192]
+            document = benchmark_allocation_matrix_v2(
+                source_path,
+                source_relative_path=source_relative,
+                source_file_sha256=file_sha256(source_path),
+                target_id=arguments.target_id,
+                backend=arguments.backend,
+                architecture=arguments.arch,
+                buffer_sizes_bytes=[value * 1024 * 1024 for value in buffer_mib],
+                warmup_iterations=arguments.warmup,
+                measured_iterations=arguments.iterations,
+                inner_iterations=arguments.inner_loops,
+                maximum_coefficient_of_variation=arguments.maximum_cv,
+                native_timeout_seconds=arguments.native_timeout_seconds,
             )
             _write_document(document, arguments.output)
             return 0
@@ -596,6 +941,182 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _write_document(document, arguments.output)
             return 0
+        if arguments.command == "normalize-public-baseline":
+            from .public_baseline import build_public_baseline
+
+            document = build_public_baseline(
+                arguments.run_directory,
+                target_id=arguments.target_id,
+                implementation_version=arguments.implementation_version,
+                source_commit=arguments.source_commit,
+                backend=arguments.backend,
+                container_image=arguments.container_image,
+                model_id=arguments.model_id,
+                model_revision=arguments.model_revision,
+                derivation_semantic_sha256=arguments.derivation_semantic_sha256,
+                input_tokens=arguments.input_tokens,
+                output_tokens=arguments.output_tokens,
+                warmup_requests=arguments.warmup_requests,
+                measured_requests=arguments.measured_requests,
+                max_concurrency=arguments.max_concurrency,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-public-baseline-run-manifest":
+            from .public_baseline import build_public_baseline_run_manifest
+
+            document = build_public_baseline_run_manifest(
+                arguments.baseline,
+                arguments.run_directory,
+                run_id=arguments.run_id,
+                git_commit=arguments.git_commit,
+                git_dirty=arguments.git_dirty,
+                dirty_patch_sha256=arguments.dirty_patch_sha256,
+                machine_baseline_sha256=arguments.machine_baseline_sha256,
+                benchmark_contract_sha256=arguments.benchmark_contract_sha256,
+                model_manifest_sha256=arguments.model_manifest_sha256,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "normalize-external-baseline":
+            from .external_baseline import build_external_baseline
+
+            document = build_external_baseline(
+                arguments.run_directory,
+                target_id=arguments.target_id,
+                implementation_name=arguments.implementation_name,
+                implementation_version=arguments.implementation_version,
+                source_commit=arguments.source_commit,
+                backend=arguments.backend,
+                container_image=arguments.container_image,
+                model_id=arguments.model_id,
+                model_revision=arguments.model_revision,
+                derivation_semantic_sha256=arguments.derivation_semantic_sha256,
+                input_tokens=arguments.input_tokens,
+                output_tokens=arguments.output_tokens,
+                warmup_requests=arguments.warmup_requests,
+                measured_requests=arguments.measured_requests,
+                max_concurrency=arguments.max_concurrency,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-external-baseline-run-manifest":
+            from .external_baseline import build_external_baseline_run_manifest
+
+            document = build_external_baseline_run_manifest(
+                arguments.baseline,
+                arguments.run_directory,
+                run_id=arguments.run_id,
+                git_commit=arguments.git_commit,
+                git_dirty=arguments.git_dirty,
+                dirty_patch_sha256=arguments.dirty_patch_sha256,
+                machine_baseline_sha256=arguments.machine_baseline_sha256,
+                benchmark_contract_sha256=arguments.benchmark_contract_sha256,
+                model_manifest_sha256=arguments.model_manifest_sha256,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "normalize-reference-host-baseline":
+            from .reference_host_baseline import build_reference_host_baseline
+
+            document = build_reference_host_baseline(
+                arguments.run_directory,
+                target_id=arguments.target_id,
+                source_commit=arguments.source_commit,
+                backend=arguments.backend,
+                container_image=arguments.container_image,
+                model_id=arguments.model_id,
+                model_revision=arguments.model_revision,
+                derivation_semantic_sha256=arguments.derivation_semantic_sha256,
+                input_tokens=arguments.input_tokens,
+                output_tokens=arguments.output_tokens,
+                warmup_requests=arguments.warmup_requests,
+                measured_requests=arguments.measured_requests,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-reference-host-run-manifest":
+            from .reference_host_baseline import build_reference_host_run_manifest
+
+            document = build_reference_host_run_manifest(
+                arguments.baseline,
+                arguments.run_directory,
+                run_id=arguments.run_id,
+                git_commit=arguments.git_commit,
+                git_dirty=arguments.git_dirty,
+                dirty_patch_sha256=arguments.dirty_patch_sha256,
+                machine_baseline_sha256=arguments.machine_baseline_sha256,
+                benchmark_contract_sha256=arguments.benchmark_contract_sha256,
+                model_manifest_sha256=arguments.model_manifest_sha256,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "normalize-compressed-host-baseline":
+            from .compressed_host_baseline import build_compressed_host_baseline
+
+            document = build_compressed_host_baseline(
+                arguments.run_directory,
+                target_id=arguments.target_id,
+                source_commit=arguments.source_commit,
+                backend=arguments.backend,
+                container_image=arguments.container_image,
+                model_id=arguments.model_id,
+                model_revision=arguments.model_revision,
+                expert_pack_sha256=arguments.expert_pack_sha256,
+                target_policy_id=arguments.target_policy_id,
+                input_tokens=arguments.input_tokens,
+                output_tokens=arguments.output_tokens,
+                warmup_requests=arguments.warmup_requests,
+                measured_requests=arguments.measured_requests,
+                safe_uma_budget_bytes=arguments.safe_uma_budget_bytes,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-compressed-host-run-manifest":
+            from .compressed_host_baseline import build_compressed_host_run_manifest
+
+            document = build_compressed_host_run_manifest(
+                arguments.baseline,
+                arguments.run_directory,
+                route_trace_sha256=arguments.route_trace_sha256,
+                run_id=arguments.run_id,
+                git_commit=arguments.git_commit,
+                git_dirty=arguments.git_dirty,
+                dirty_patch_sha256=arguments.dirty_patch_sha256,
+                machine_baseline_sha256=arguments.machine_baseline_sha256,
+                benchmark_contract_sha256=arguments.benchmark_contract_sha256,
+                model_manifest_sha256=arguments.model_manifest_sha256,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-route-trace":
+            from .route_trace import build_route_trace
+
+            document = build_route_trace(
+                arguments.capture,
+                trace_id=arguments.trace_id,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "replay-route-trace":
+            from .route_trace import build_replay_summary
+
+            trace = validate_file(arguments.trace, require_frozen=True)
+            document = build_replay_summary(trace)
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "inspect-expert-pack":
+            from .expert_pack import inspect_expert_pack
+
+            document = inspect_expert_pack(arguments.pack)
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "inspect-target-pack":
+            from .target_pack import inspect_target_pack
+
+            document = inspect_target_pack(arguments.pack)
+            _write_document(document, arguments.output)
+            return 0
         if arguments.command == "inventory-safetensors":
             from .safetensors_inventory import verify_model_manifest_artifacts
 
@@ -659,6 +1180,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_document(document, arguments.output)
             if output_path is not None:
                 validate_file(output_path)
+            return 0
+        if arguments.command == "build-spark-traffic-model":
+            from .traffic_model import build_spark_traffic_model
+
+            source_ledger = validate_file(arguments.source_ledger, require_frozen=True)
+            weight_traffic = validate_file(arguments.weight_traffic)
+            route_trace = validate_file(arguments.route_trace, require_frozen=True)
+            bandwidth_soak = validate_file(arguments.bandwidth_soak)
+            try:
+                model_config = json.loads(
+                    arguments.model_config.read_text(encoding="utf-8")
+                )
+            except json.JSONDecodeError as exc:
+                raise ContractError(f"cannot parse model config: {exc}") from exc
+            if not isinstance(model_config, dict):
+                raise ContractError("model config must contain an object")
+            document = build_spark_traffic_model(
+                source_ledger,
+                weight_traffic,
+                route_trace,
+                bandwidth_soak,
+                model_config,
+                source_ledger_path=str(arguments.source_ledger),
+                source_ledger_file_sha256=file_sha256(arguments.source_ledger),
+                weight_traffic_path=str(arguments.weight_traffic),
+                weight_traffic_file_sha256=file_sha256(arguments.weight_traffic),
+                route_trace_path=str(arguments.route_trace),
+                route_trace_file_sha256=file_sha256(arguments.route_trace),
+                bandwidth_soak_path=str(arguments.bandwidth_soak),
+                bandwidth_soak_file_sha256=file_sha256(arguments.bandwidth_soak),
+                model_config_path=str(arguments.model_config),
+                model_config_file_sha256=file_sha256(arguments.model_config),
+                amplification_factors=arguments.factors
+                or [1.0, 1.25, 1.5, 2.0, 3.0, 4.0],
+            )
+            _write_document(document, arguments.output)
             return 0
     except (ContractError, OSError, ValueError) as exc:
         print(f"umaq: error: {exc}", file=sys.stderr)

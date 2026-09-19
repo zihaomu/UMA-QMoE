@@ -1,0 +1,105 @@
+schema_version: 1
+kind: model_manifest
+status: frozen
+model_id: Qwen/Qwen1.5-MoE-A2.7B
+model_revision: 1a758c50ecb6350748b9ce0a99d2352fd9fc11c9
+variant: base
+config:
+  path: config.json
+  size_bytes: 919
+  sha256: d0b1cd8f35beccb75211c06940da3274ea986363792ab0ececb60d4ec03dd8c6
+architecture:
+  class_name: Qwen2MoeForCausalLM
+  model_type: qwen2_moe
+  num_layers: 24
+  hidden_size: 2048
+  expert_intermediate_size: 5632
+  num_experts: 60
+  top_k: 4
+  max_position_embeddings: 8192
+  normalize_top_k_probability: false
+  declared_total_parameters: 14.3B
+  declared_active_parameters: 2.7B
+tokenizer:
+  repository: Qwen/Qwen1.5-MoE-A2.7B
+  revision: 1a758c50ecb6350748b9ce0a99d2352fd9fc11c9
+  chat_template: '{% for message in messages %}{% if loop.first and messages[0][''role'']
+    != ''system'' %}{{ ''<|im_start|>system
+
+    You are a helpful assistant<|im_end|>
+
+    '' }}{% endif %}{{''<|im_start|>'' + message[''role''] + ''
+
+    '' + message[''content''] + ''<|im_end|>'' + ''
+
+    ''}}{% endfor %}{% if add_generation_prompt %}{{ ''<|im_start|>assistant
+
+    '' }}{% endif %}'
+  files:
+  - path: tokenizer.json
+    size_bytes: 7028015
+    sha256: f7c9b2dba4a296b1aa76c16a34b8225c0c118978400d4bb66bff0902d702f5b8
+  - path: tokenizer_config.json
+    size_bytes: 1290
+    sha256: d30087dd5f3fe386f6d6c029a449798f118ff0afde8824c4d618eb9523d931e6
+  - path: vocab.json
+    size_bytes: 2776833
+    sha256: ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910
+  - path: merges.txt
+    size_bytes: 1671839
+    sha256: 599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3
+dtypes:
+  config_declared: bfloat16
+  uploaded_weights: bfloat16
+  uploaded_weights_evidence: Hugging Face API safetensors.parameters at pinned revision
+  api_reported_parameter_counts:
+    BF16: 14315784192
+  model_card_uploaded_weights_claim: bfloat16
+  evidence_conflict: false
+  oracle_compute: bfloat16
+  local_tensor_scan: verified
+  observed_tensor_dtypes:
+  - BF16
+weights:
+  format: safetensors
+  hash_source: local_sha256
+  local_verification: verified
+  tensor_hashes_status: verified
+  artifacts:
+  - path: model-00001-of-00008.safetensors
+    size_bytes: 3999614664
+    sha256: 44f12f5b3d4e8eebeb55fa733e9dbbd7e119c9bf1502251638223e0dc2a926f0
+  - path: model-00002-of-00008.safetensors
+    size_bytes: 3999385424
+    sha256: 20a99873170c32cd91b489a10ab9408ca73d3f20cf5f57370cf31699aaf2d266
+  - path: model-00003-of-00008.safetensors
+    size_bytes: 3988628968
+    sha256: e0b7cd920fc98f99e1d83ea856e73f451029ed16dba7ff83b4b839e77ba2d229
+  - path: model-00004-of-00008.safetensors
+    size_bytes: 3999386088
+    sha256: e2be2af186e5c042e2246947d13640df5bd4ed59512932573996aca155b8e9a9
+  - path: model-00005-of-00008.safetensors
+    size_bytes: 3988629648
+    sha256: 3b75e01d4df9de74823e146a2c1e8826c80f838dcc7d1bd3bf376b68b8a527da
+  - path: model-00006-of-00008.safetensors
+    size_bytes: 3999386104
+    sha256: c2fc223a88189b3950a4b737fe4c75ae40f792f2e7b30df159afe3cf392589d3
+  - path: model-00007-of-00008.safetensors
+    size_bytes: 3988629648
+    sha256: 88b206c85ee08b9704d2ddb5dcf15b91e5d750884c767c29a93fc91781cb7267
+  - path: model-00008-of-00008.safetensors
+    size_bytes: 668484400
+    sha256: 996c5057f123db509d3c40c97d6e65dac35eb9ffc71f3ac324a0a531da43e112
+  - path: model.safetensors.index.json
+    size_bytes: 416452
+    sha256: ece1b223efe32f4349d0dfa2a522249ac10bcb89369ed25b222c35175cd90b53
+  tensor_inventory:
+    path: models/inventories/qwen1_5_moe_a2_7b_bf16.json
+    sha256: 9a3abfe176cd7a704b950573c4ce7d2967d11c36f8792881de33a2e8e7365be0
+    source_manifest_sha256: b4098c447e381fa967707e46dd7e6fe2308ff292c00769fb81ac079b10681ee7
+provenance:
+  provider: huggingface
+  repository: Qwen/Qwen1.5-MoE-A2.7B
+  resolved_at: '2026-09-19T11:02:04Z'
+  metadata_endpoint: https://huggingface.co/api/models/Qwen/Qwen1.5-MoE-A2.7B/revision/1a758c50ecb6350748b9ce0a99d2352fd9fc11c9?blobs=true
+license: other

@@ -12,15 +12,35 @@ targets:
   - id: halo3
     accelerator_architecture: gfx1151
     backend: hip
-    container_image: ghcr.io/inferstation/vllm-rocm-halo@sha256:13d6a8e2de3e582c42d4067469c0da0c21bedd117f77a9fe95934312ee052663
-    runtime_source_commit: 554a3d41f0922ee7c7f41da5a53ff891b0d0cbbb
-    runtime_source_ref: gfx11
+    host_toolchain:
+      container_image: ghcr.io/inferstation/vllm-rocm-halo@sha256:13d6a8e2de3e582c42d4067469c0da0c21bedd117f77a9fe95934312ee052663
+      framework: pytorch_transformers
+      torch_version: 2.14.0a0+rocm7.15.0a20260719
+      transformers_version: 5.10.2
+      backend_version: ROCm 7.15.0
+    external_baselines:
+      - id: vllm_public_v1
+        implementation: vllm
+        container_image: ghcr.io/inferstation/vllm-rocm-halo@sha256:13d6a8e2de3e582c42d4067469c0da0c21bedd117f77a9fe95934312ee052663
+        source_commit: 554a3d41f0922ee7c7f41da5a53ff891b0d0cbbb
+        source_ref: gfx11
+        status: optional
   - id: spark1
     accelerator_architecture: sm_121a
     backend: cuda
-    container_image: ghcr.io/inferstation/vllm-cuda-spark@sha256:2f7bf5e1abe0597cdefaa22c2f6d0ebc8da09ff5f3a11bac4f54722a90fb8835
-    runtime_source_commit: 98dff2a81d747d1dba01a47f939f48c3526d4206
-    runtime_source_ref: v0.29.0
+    host_toolchain:
+      container_image: ghcr.io/inferstation/vllm-cuda-spark@sha256:2f7bf5e1abe0597cdefaa22c2f6d0ebc8da09ff5f3a11bac4f54722a90fb8835
+      framework: pytorch_transformers
+      torch_version: 2.13.0+cu130
+      transformers_version: 5.16.1
+      backend_version: CUDA 13.0
+    external_baselines:
+      - id: vllm_public_v1
+        implementation: vllm
+        container_image: ghcr.io/inferstation/vllm-cuda-spark@sha256:2f7bf5e1abe0597cdefaa22c2f6d0ebc8da09ff5f3a11bac4f54722a90fb8835
+        source_commit: 98dff2a81d747d1dba01a47f939f48c3526d4206
+        source_ref: v0.29.0
+        status: optional
 
 oracle:
   weight_dtype: bfloat16
@@ -95,9 +115,11 @@ quality_gates:
     required_from: M2
     max_normalized_task_score_drop_points: 0.5
   - id: q4_router_top_k_agreement
-    applicability: pending
-    pending_reason: first immutable OLMoE RouteTrace has not been captured
+    applicability: required
     required_from: M2
+    trace_reference:
+      path: benchmarks/traces/olmoe_1b_7b_0125_128x32_greedy_v1.json
+      sha256: 83a2b4e74af92e7796c926609da57c85f8f1c919901a49f45c17172e0a8f4297
     min_router_top_k_set_agreement: 0.99
   - id: instruction_chat_tool_use
     applicability: not_applicable
@@ -113,8 +135,14 @@ resource_gates:
   max_swap_bytes: 0
   max_major_page_faults: 0
   safe_uma_budget:
-    status: pending_measurement
-    references: []
+    status: frozen
+    references:
+      - target_id: halo3
+        path: benchmarks/budgets/halo3_safe_uma_v1.json
+        sha256: 69067a1e4ea3c835a851daea6134b5e2697194b22cc6d23be608ef7a42410c6d
+      - target_id: spark1
+        path: benchmarks/budgets/spark1_safe_uma_v1.json
+        sha256: 0d9ba06f168fe7ac9f0445ed6c78b8646ddb8cd00f47099f0c1972effaff3752
   single_compressed_weight_copy: true
   allow_global_dequantized_expert: false
 
@@ -132,5 +160,3 @@ statistics:
 
 blocking_items:
   - Freeze quality dataset revisions and immutable sample ID lists
-  - Capture the first immutable OLMoE RouteTrace
-  - Measure and freeze Safe UMA Budget on halo3 and spark1

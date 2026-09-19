@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "method", "reference", "all_q4_baseline", "storage", "rows", "ranking", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "mixed_precision_sensitivity" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "enum": ["halo3", "spark1"] },
+    "status": { "enum": ["passed", "failed"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision", "expert_pack_sha256"],
+      "properties": {
+        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "expert_pack_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "diagnostic_only", "materializes_expert_parameters", "performance_evidence", "candidate_definition", "restored_layers"],
+      "properties": {
+        "id": { "const": "single-layer-bf16-restore-v1" },
+        "diagnostic_only": { "const": true },
+        "materializes_expert_parameters": { "const": true },
+        "performance_evidence": { "const": false },
+        "candidate_definition": { "const": "one BF16 expert layer plus fifteen canonical Q4-dequantized expert layers" },
+        "restored_layers": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "integer", "minimum": 0, "maximum": 15 }, "uniqueItems": true }
+      }
+    },
+    "reference": { "$ref": "#/$defs/capture" },
+    "all_q4_baseline": { "$ref": "#/$defs/metrics" },
+    "storage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["all_q4_bytes", "single_bf16_layer_bytes", "replaced_q4_layer_bytes", "single_layer_mixed_bytes", "all_q4_effective_bpw", "single_layer_mixed_effective_bpw"],
+      "properties": {
+        "all_q4_bytes": { "type": "integer", "minimum": 1 },
+        "single_bf16_layer_bytes": { "type": "integer", "minimum": 1 },
+        "replaced_q4_layer_bytes": { "type": "integer", "minimum": 1 },
+        "single_layer_mixed_bytes": { "type": "integer", "minimum": 1 },
+        "all_q4_effective_bpw": { "type": "number", "exclusiveMinimum": 0 },
+        "single_layer_mixed_effective_bpw": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "rows": {
+      "type": "array", "minItems": 16, "maxItems": 16,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["restored_layer", "metrics", "delta_vs_all_q4", "finite"],
+        "properties": {
+          "restored_layer": { "type": "integer", "minimum": 0, "maximum": 15 },
+          "metrics": { "$ref": "#/$defs/metrics" },
+          "delta_vs_all_q4": {
+            "type": "object", "additionalProperties": false,
+            "required": ["router_exact_set_agreement", "router_mean_set_overlap", "logit_cosine_similarity"],
+            "properties": {
+              "router_exact_set_agreement": { "type": "number", "minimum": -1, "maximum": 1 },
+              "router_mean_set_overlap": { "type": "number", "minimum": -1, "maximum": 1 },
+              "logit_cosine_similarity": { "type": "number", "minimum": -2, "maximum": 2 }
+            }
+          },
+          "finite": { "type": "boolean" }
+        }
+      }
+    },
+    "ranking": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "integer", "minimum": 0, "maximum": 15 }, "uniqueItems": true },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference_finite", "all_q4_finite", "all_layers_covered", "matrix_finite", "quality_gate_unchanged", "overall_passed"],
+      "properties": {
+        "reference_finite": { "type": "boolean" },
+        "all_q4_finite": { "type": "boolean" },
+        "all_layers_covered": { "type": "boolean" },
+        "matrix_finite": { "type": "boolean" },
+        "quality_gate_unchanged": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "capture": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finite", "logits_sha256", "routes_sha256", "top1_token_id"],
+      "properties": {
+        "finite": { "type": "boolean" },
+        "logits_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "routes_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "top1_token_id": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finite", "top1_token_id", "top1_matches_reference", "logit_max_absolute_error", "logit_p99_absolute_error", "logit_cosine_similarity", "router_exact_set_agreement", "router_mean_set_overlap", "per_layer_router_exact_set_agreement"],
+      "properties": {
+        "finite": { "type": "boolean" },
+        "top1_token_id": { "type": "integer", "minimum": 0 },
+        "top1_matches_reference": { "type": "boolean" },
+        "logit_max_absolute_error": { "type": "number", "minimum": 0 },
+        "logit_p99_absolute_error": { "type": "number", "minimum": 0 },
+        "logit_cosine_similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+        "router_exact_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
+        "router_mean_set_overlap": { "type": "number", "minimum": 0, "maximum": 1 },
+        "per_layer_router_exact_set_agreement": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "number", "minimum": 0, "maximum": 1 } }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "cgroup_memory_max_bytes": 103079215104,
+  "decision_record": "Freeze model/artifact budget at 32 GiB. The 96 GiB cgroup cap already leaves host OS headroom outside the workload. Reserve 16 GiB runtime, 12 GiB KV, 12 GiB workspace, and 24 GiB safety. Higher 48/64 GiB pressure exposed VMM/pageable jitter and remains diagnostic only; Managed was stable.",
+  "kind": "safe_uma_budget",
+  "kv_budget_bytes": 12884901888,
+  "mem_total_bytes": 128495218688,
+  "os_daemon_reserve_bytes": 0,
+  "physical_limit_bytes": 103079215104,
+  "policy_provenance": "96 GiB no-swap cgroup; AllocationMatrixV2 safe-boundary semantic 038a8a9b8c9c935a5548c9793111040e3f5f7e619deac286cb1a439a8c338493; 16 GiB per buffer/32 GiB simultaneous working set; 5 warmups, 10 samples, CV <=10%, no swap/OOM",
+  "runtime_reserve_bytes": 17179869184,
+  "safe_budget_bytes": 34359738368,
+  "safety_margin_bytes": 25769803776,
+  "schema_version": 1,
+  "source_snapshot_sha256": "2f7393f130432c3bc29e2d1104597710375d1de718991a6278de26884b2c399b",
+  "status": "frozen",
+  "target_id": "spark1",
+  "total_reserved_bytes": 68719476736,
+  "workspace_budget_bytes": 12884901888
+}

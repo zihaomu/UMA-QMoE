@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/compressed_loader_evidence.schema.json",
+  "title": "UMA-QMoE Compressed Loader Evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "loader", "memory", "smoke", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "compressed_loader_evidence" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "enum": ["passed", "failed"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision", "expert_pack_sha256"],
+      "properties": {
+        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" },
+        "expert_pack_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "loader": {
+      "type": "object", "additionalProperties": false,
+      "required": ["device", "performance_mode", "dense_tensor_count", "dense_tensor_bytes", "skipped_expert_tensor_count", "loaded_expert_tensor_count", "expert_parameter_count", "quantized_moe_block_count", "model_parameter_bytes", "expert_pack_size_bytes", "expert_pack_mapping_count", "expert_pack_vma_count"],
+      "properties": {
+        "device": { "type": "string", "minLength": 1 },
+        "performance_mode": { "const": false },
+        "dense_tensor_count": { "type": "integer", "minimum": 1 },
+        "dense_tensor_bytes": { "type": "integer", "minimum": 1 },
+        "skipped_expert_tensor_count": { "const": 3072 },
+        "loaded_expert_tensor_count": { "const": 0 },
+        "expert_parameter_count": { "const": 0 },
+        "quantized_moe_block_count": { "const": 16 },
+        "model_parameter_bytes": { "type": "integer", "minimum": 1 },
+        "expert_pack_size_bytes": { "type": "integer", "minimum": 1 },
+        "expert_pack_mapping_count": { "const": 1 },
+        "expert_pack_vma_count": { "enum": [-1, 1] }
+      }
+    },
+    "memory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cgroup_current_bytes", "cgroup_peak_bytes", "torch_allocated_bytes", "torch_reserved_bytes"],
+      "properties": {
+        "cgroup_current_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "cgroup_peak_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "torch_allocated_bytes": { "type": "integer", "minimum": 0 },
+        "torch_reserved_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "smoke": {
+      "type": "object", "additionalProperties": false,
+      "required": ["prompt_id", "logits_shape", "finite", "top1_token_id", "logits_sha256"],
+      "properties": {
+        "prompt_id": { "type": "string", "minLength": 1 },
+        "logits_shape": { "const": [1, 50304] },
+        "finite": { "const": true },
+        "top1_token_id": { "type": "integer", "minimum": 0, "maximum": 50303 },
+        "logits_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dense_only_checkpoint_load", "no_expert_parameters", "single_pack_mapping", "no_full_dequantized_copy", "full_model_forward", "overall_passed"],
+      "properties": {
+        "dense_only_checkpoint_load": { "type": "boolean" },
+        "no_expert_parameters": { "type": "boolean" },
+        "single_pack_mapping": { "type": "boolean" },
+        "no_full_dequantized_copy": { "type": "boolean" },
+        "full_model_forward": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  }
+}

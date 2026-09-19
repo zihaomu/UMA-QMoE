@@ -20,6 +20,7 @@ from uma_qmoe.machine import collect_machine_baseline
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = PROJECT_ROOT / "models/manifests/olmoe_1b_7b_0125.yaml"
+QWEN_MODEL_PATH = PROJECT_ROOT / "models/manifests/qwen1_5_moe_a2_7b.yaml"
 CONTRACT_PATH = PROJECT_ROOT / "benchmarks/contracts/olmoe_1b_7b_0125.yaml"
 
 
@@ -59,6 +60,40 @@ def test_pinned_olmoe_manifest_matches_architecture_golden_values() -> None:
     assert manifest["dtypes"]["api_reported_parameter_counts"] == {"F32": 6919161856}
     assert manifest["dtypes"]["model_card_uploaded_weights_claim"] == "bfloat16"
     assert manifest["dtypes"]["evidence_conflict"] is True
+
+
+def test_pinned_qwen_moe_manifest_matches_architecture_golden_values() -> None:
+    manifest = validate_file(QWEN_MODEL_PATH, require_frozen=True)
+
+    assert manifest["status"] == "frozen"
+    assert manifest["model_revision"] == "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9"
+    assert manifest["architecture"] == {
+        "class_name": "Qwen2MoeForCausalLM",
+        "model_type": "qwen2_moe",
+        "num_layers": 24,
+        "hidden_size": 2048,
+        "expert_intermediate_size": 5632,
+        "num_experts": 60,
+        "top_k": 4,
+        "max_position_embeddings": 8192,
+        "normalize_top_k_probability": False,
+        "declared_total_parameters": "14.3B",
+        "declared_active_parameters": "2.7B",
+    }
+    assert manifest["dtypes"]["uploaded_weights"] == "bfloat16"
+    assert manifest["dtypes"]["api_reported_parameter_counts"] == {
+        "BF16": 14_315_784_192
+    }
+    assert manifest["dtypes"]["observed_tensor_dtypes"] == ["BF16"]
+    assert manifest["weights"]["tensor_inventory"] == {
+        "path": "models/inventories/qwen1_5_moe_a2_7b_bf16.json",
+        "sha256": "9a3abfe176cd7a704b950573c4ce7d2967d11c36f8792881de33a2e8e7365be0",
+        "source_manifest_sha256": (
+            "b4098c447e381fa967707e46dd7e6fe2308ff292c00769fb81ac079b10681ee7"
+        ),
+    }
+    assert manifest["dtypes"]["evidence_conflict"] is False
+    assert len(manifest["weights"]["artifacts"]) == 9
 
 
 def test_semantic_hash_is_stable_across_key_order_and_resolution_time() -> None:
@@ -162,6 +197,7 @@ def test_required_quality_gate_requires_threshold_and_evidence() -> None:
     no_trace = _contract_ready_for_frozen_gate_tests()
     gate = no_trace["quality_gates"][2]
     gate["applicability"] = "required"
+    gate.pop("trace_reference", None)
     with pytest.raises(ContractError, match="pinned trace reference"):
         validate_document(no_trace, require_frozen=True)
 
@@ -340,6 +376,12 @@ def test_run_manifest_rejects_secret_like_environment_names() -> None:
     }
 
     with pytest.raises(ContractError, match="secret-like"):
+        validate_document(run)
+
+    run["command"]["environment_allowlist"] = {}
+    artifact = {"path": "result.json", "sha256": "5" * 64, "size_bytes": 1}
+    run["raw_artifacts"] = [artifact, copy.deepcopy(artifact)]
+    with pytest.raises(ContractError, match="duplicate paths"):
         validate_document(run)
 
 
