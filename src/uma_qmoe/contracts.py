@@ -33,6 +33,7 @@ SCHEMA_BY_KIND = {
     "model_derivation": "model_derivation.schema.json",
     "memory_snapshot": "memory_snapshot.schema.json",
     "mixed_precision_refinement": "mixed_precision_refinement.schema.json",
+    "mixed_precision_policy_search": "mixed_precision_policy_search.schema.json",
     "mixed_precision_sensitivity": "mixed_precision_sensitivity.schema.json",
     "native_stream_benchmark": "native_stream_benchmark.schema.json",
     "model_manifest": "model_manifest.schema.json",
@@ -501,6 +502,100 @@ def validate_document(
             )
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Mixed-precision refinement status is inconsistent")
+    elif kind == "mixed_precision_policy_search":
+        dataset = document["dataset"]
+        reference = document["reference"]
+        baseline = document["all_q4_baseline"]
+        storage = document["storage"]
+        order = document["method"]["expert_order"]
+        rows = document["candidate_rows"]
+        if dataset["sample_count"] != len(dataset["sample_ids"]):
+            raise ContractError("Mixed-precision policy dataset count is inconsistent")
+        if len(rows) != len(order):
+            raise ContractError("Mixed-precision policy row count is inconsistent")
+        if not math.isclose(
+            reference["perplexity"],
+            math.exp(reference["nll"]),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ContractError("Mixed-precision reference perplexity is inconsistent")
+        for metrics in [baseline, *(row["metrics"] for row in rows)]:
+            expected_ppl = math.exp(metrics["nll"])
+            if not math.isclose(
+                metrics["perplexity"], expected_ppl, rel_tol=1e-9, abs_tol=1e-12
+            ):
+                raise ContractError("Mixed-precision policy perplexity is inconsistent")
+            expected_nll_change = (metrics["nll"] / reference["nll"]) - 1.0
+            expected_ppl_change = (
+                metrics["perplexity"] / reference["perplexity"]
+            ) - 1.0
+            if not math.isclose(
+                metrics["relative_nll_change"],
+                expected_nll_change,
+                rel_tol=1e-9,
+                abs_tol=1e-12,
+            ) or not math.isclose(
+                metrics["relative_perplexity_change"],
+                expected_ppl_change,
+                rel_tol=1e-9,
+                abs_tol=1e-12,
+            ):
+                raise ContractError(
+                    "Mixed-precision policy relative quality is inconsistent"
+                )
+        expected_prefix: list[int] = []
+        for index, row in enumerate(rows):
+            expected_prefix.append(order[index])
+            expected_policy = "layer2-" + "-".join(
+                f"e{expert}" for expert in expected_prefix
+            )
+            expected_extra = len(expected_prefix) * storage["single_expert_extra_bytes"]
+            expected_mixed = storage["all_q4_bytes"] + expected_extra
+            expected_bpw = expected_mixed * 8 / storage["total_expert_weight_count"]
+            if (
+                row["added_expert"] != order[index]
+                or row["restored_experts"] != expected_prefix
+                or row["policy_id"] != expected_policy
+                or row["extra_bytes"] != expected_extra
+                or row["mixed_bytes"] != expected_mixed
+                or not math.isclose(row["effective_bpw"], expected_bpw, rel_tol=1e-9)
+            ):
+                raise ContractError(
+                    "Mixed-precision policy prefix or storage is inconsistent"
+                )
+        quality = document["quality_gate"]
+        passing = [
+            row
+            for row in rows
+            if row["metrics"]["relative_perplexity_change"]
+            <= quality["maximum_relative_perplexity_increase"]
+            and row["metrics"]["router_exact_set_agreement"]
+            >= quality["minimum_router_exact_set_agreement"]
+        ]
+        expected_first = passing[0]["policy_id"] if passing else None
+        if quality["first_passing_policy_id"] != expected_first:
+            raise ContractError("Mixed-precision policy gate result is inconsistent")
+        gates = document["gates"]
+        expected = {
+            "reference_finite": reference["finite"],
+            "all_q4_finite": baseline["finite"],
+            "dataset_complete": dataset["sample_count"] >= 2
+            and dataset["target_token_count"] >= 2,
+            "prefix_progression": len(rows) == len(order),
+            "matrix_finite": all(row["finite"] for row in rows),
+            "quality_gate_unchanged": math.isclose(
+                quality["maximum_relative_perplexity_increase"], 0.01
+            )
+            and math.isclose(quality["minimum_router_exact_set_agreement"], 0.99),
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Mixed-precision policy gate does not match evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Mixed-precision policy overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Mixed-precision policy status is inconsistent")
     elif kind == "traffic_source_ledger":
         from .traffic_model import (
             TrafficModelError,
