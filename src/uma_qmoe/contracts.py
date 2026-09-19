@@ -26,6 +26,7 @@ SCHEMA_BY_KIND = {
     "external_baseline": "external_baseline.schema.json",
     "expert_pack_manifest": "expert_pack_manifest.schema.json",
     "hardware_counter_calibration": "hardware_counter_calibration.schema.json",
+    "layer_precision_search": "layer_precision_search.schema.json",
     "machine_baseline": "machine_baseline.schema.json",
     "memory_bandwidth_benchmark": "memory_bandwidth_benchmark.schema.json",
     "native_allocation_capabilities": "native_allocation_capabilities.schema.json",
@@ -886,6 +887,185 @@ def validate_document(
             raise ContractError("Compensation overall gate is inconsistent")
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Compensation status is inconsistent")
+    elif kind == "layer_precision_search":
+        reference = document["reference"]
+        sources = document["source_uniform_metrics"]
+        searches = document["searches"]
+        storage = document["storage"]
+        quality = document["quality_gate"]
+        expected_bits = [8, 9, 12]
+        if (
+            storage["expert_weight_count_per_layer"] * 16
+            != storage["total_expert_weight_count"]
+        ):
+            raise ContractError("Layer precision storage partition is inconsistent")
+        if [row["base_bits"] for row in sources] != expected_bits or [
+            row["candidate_id"] for row in sources
+        ] != ["q8-g128", "q9-g128", "q12-g128"]:
+            raise ContractError("Layer precision source rows are inconsistent")
+        if [search["base_bits"] for search in searches] != expected_bits:
+            raise ContractError("Layer precision search order is inconsistent")
+        if not math.isclose(
+            reference["perplexity"],
+            math.exp(reference["nll"]),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ContractError("Layer precision reference perplexity is inconsistent")
+        for source in sources:
+            _validate_quality_metrics(
+                source["metrics"], reference, "Layer precision source"
+            )
+        passing_policies: list[dict[str, Any]] = []
+        base_reproduced = True
+        all_layers_covered = True
+        matrix_finite = True
+        upper_bounds = True
+        for source, search in zip(sources, searches, strict=True):
+            bits = search["base_bits"]
+            base_bpw = bits + 0.25
+            if not math.isclose(search["base_effective_bpw"], base_bpw):
+                raise ContractError("Layer precision base storage is inconsistent")
+            _validate_quality_metrics(
+                search["base_metrics"], reference, "Layer precision base"
+            )
+            base_reproduced = (
+                base_reproduced
+                and math.isclose(
+                    search["base_metrics"]["nll"],
+                    source["metrics"]["nll"],
+                    abs_tol=1e-6,
+                )
+                and math.isclose(
+                    search["base_metrics"]["router_exact_set_agreement"],
+                    source["metrics"]["router_exact_set_agreement"],
+                    abs_tol=1e-12,
+                )
+            )
+            singles = search["single_layer_rows"]
+            cumulative = search["cumulative_rows"]
+            for row in singles:
+                _validate_quality_metrics(
+                    row["metrics"], reference, "Layer precision single"
+                )
+                if row["finite"] != row["metrics"]["finite"]:
+                    raise ContractError("Layer precision finite flag is inconsistent")
+            expected_ranking = [
+                row["restored_layer"]
+                for row in sorted(
+                    singles,
+                    key=lambda row: (
+                        -row["metrics"]["router_exact_set_agreement"],
+                        row["metrics"]["relative_perplexity_change"],
+                        row["restored_layer"],
+                    ),
+                )
+            ]
+            if search["ranking"] != expected_ranking:
+                raise ContractError("Layer precision ranking is inconsistent")
+            restored: list[int] = []
+            for index, row in enumerate(cumulative):
+                restored.append(expected_ranking[index])
+                _validate_quality_metrics(
+                    row["metrics"], reference, "Layer precision cumulative"
+                )
+                effective_bpw = base_bpw + len(restored) * (16.0 - base_bpw) / 16
+                payload_bytes = math.ceil(
+                    effective_bpw * storage["total_expert_weight_count"] / 8
+                )
+                if (
+                    row["added_layer"] != expected_ranking[index]
+                    or row["restored_layers"] != restored
+                    or not math.isclose(row["effective_bpw"], effective_bpw)
+                    or row["projected_payload_bytes"] != payload_bytes
+                    or row["finite"] != row["metrics"]["finite"]
+                ):
+                    raise ContractError(
+                        "Layer precision cumulative progression is inconsistent"
+                    )
+            qualifying = [
+                row
+                for row in cumulative
+                if row["metrics"]["relative_perplexity_change"]
+                <= quality["maximum_relative_perplexity_increase"]
+                and row["metrics"]["router_exact_set_agreement"]
+                >= quality["minimum_router_exact_set_agreement"]
+            ]
+            expected_first = qualifying[0]["restored_layers"] if qualifying else None
+            if search["first_passing_restored_layers"] != expected_first:
+                raise ContractError("Layer precision passing prefix is inconsistent")
+            if (
+                search["base_metrics"]["relative_perplexity_change"]
+                <= quality["maximum_relative_perplexity_increase"]
+                and search["base_metrics"]["router_exact_set_agreement"]
+                >= quality["minimum_router_exact_set_agreement"]
+            ):
+                passing_policies.append(
+                    {
+                        "base_bits": bits,
+                        "restored_layers": [],
+                        "effective_bpw": base_bpw,
+                    }
+                )
+            passing_policies.extend(
+                {
+                    "base_bits": bits,
+                    "restored_layers": row["restored_layers"],
+                    "effective_bpw": row["effective_bpw"],
+                }
+                for row in qualifying
+            )
+            all_layers_covered = all_layers_covered and (
+                [row["restored_layer"] for row in singles] == list(range(16))
+                and sorted(search["ranking"]) == list(range(16))
+                and cumulative[-1]["restored_layers"] == search["ranking"]
+            )
+            matrix_finite = (
+                matrix_finite
+                and search["base_metrics"]["finite"]
+                and all(row["finite"] for row in singles + cumulative)
+            )
+            upper = cumulative[-1]["metrics"]
+            upper_bounds = upper_bounds and (
+                math.isclose(upper["relative_perplexity_change"], 0.0, abs_tol=1e-12)
+                and math.isclose(upper["router_exact_set_agreement"], 1.0)
+                and math.isclose(upper["logit_max_absolute_error"], 0.0, abs_tol=1e-12)
+            )
+        expected_lowest = (
+            min(
+                passing_policies,
+                key=lambda row: (
+                    row["effective_bpw"],
+                    row["base_bits"],
+                    len(row["restored_layers"]),
+                ),
+            )
+            if passing_policies
+            else None
+        )
+        if quality["lowest_bpw_passing_policy"] != expected_lowest:
+            raise ContractError("Layer precision lowest-bpw policy is inconsistent")
+        expected = {
+            "source_evidence_compatible": True,
+            "dataset_identity": True,
+            "reference_finite": reference["finite"],
+            "base_metrics_reproduced": base_reproduced,
+            "all_layers_covered": all_layers_covered,
+            "matrix_finite": matrix_finite,
+            "bf16_upper_bounds": upper_bounds,
+            "quality_gate_unchanged": math.isclose(
+                quality["maximum_relative_perplexity_increase"], 0.01
+            )
+            and math.isclose(quality["minimum_router_exact_set_agreement"], 0.99),
+        }
+        gates = document["gates"]
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Layer precision gate does not match evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Layer precision overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Layer precision status is inconsistent")
     elif kind == "traffic_source_ledger":
         from .traffic_model import (
             TrafficModelError,
