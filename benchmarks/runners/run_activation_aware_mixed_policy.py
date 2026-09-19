@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from run_mixed_precision_policy_search import (
     _capture_quality,
     _fixture_semantic_sha256,
@@ -26,7 +28,12 @@ from run_mixed_precision_sensitivity import (
     _tensor_sha256,
 )
 from uma_qmoe.contracts import canonical_sha256, validate_document
-from uma_qmoe.target_pack import write_target_pack
+from uma_qmoe.q4 import pack_int4
+from uma_qmoe.target_pack import (
+    TargetTensor,
+    decode_target_tensor,
+    write_target_pack,
+)
 
 
 LAYER_COUNT = 16
@@ -56,26 +63,55 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _uniform_quantize_expert(source: Any, *, bits: int, torch: Any) -> Any:
-    qmax = (1 << (bits - 1)) - 1
+def _restore_target_tensor(tensor: TargetTensor, source: Any, torch: Any) -> Any:
+    restored = np.array(decode_target_tensor(tensor), copy=True)
+    return torch.from_numpy(restored).to(device=source.device, dtype=source.dtype)
+
+
+def _uniform_q8_target(source: Any, torch: Any) -> TargetTensor:
     rows, columns = source.shape
     if columns % GROUP_SIZE:
         raise RuntimeError("expert projection is not group aligned")
     groups = source.float().reshape(rows, columns // GROUP_SIZE, GROUP_SIZE)
     maximum = groups.abs().amax(dim=-1, keepdim=True)
-    scale = maximum / qmax
+    scale = maximum / 127.0
     safe_scale = torch.where(scale > 0, scale, torch.ones_like(scale))
-    restored = torch.round(groups / safe_scale).clamp(-qmax, qmax) * safe_scale
-    return restored.reshape(source.shape).to(source.dtype)
+    quantized = torch.round(groups / safe_scale).clamp(-127, 127).to(torch.int8)
+    return TargetTensor(
+        shape=tuple(int(value) for value in source.shape),
+        encoding="q8_group128",
+        data=quantized.reshape(-1).detach().cpu().numpy().tobytes(),
+        scales=(
+            safe_scale.squeeze(-1)
+            .detach()
+            .cpu()
+            .numpy()
+            .astype("<f4", copy=False)
+            .tobytes()
+        ),
+        group_size=GROUP_SIZE,
+    )
 
 
-def _quantize_layer_q8(layer: Any, torch: Any) -> None:
+def _quantize_layer_q8(
+    layer: Any,
+    layer_index: int,
+    encoded: dict[str, TargetTensor],
+    torch: Any,
+) -> None:
     with torch.inference_mode():
         for expert_index in range(EXPERT_COUNT):
             gate_up = layer.mlp.experts.gate_up_proj[expert_index]
-            gate_up.copy_(_uniform_quantize_expert(gate_up, bits=8, torch=torch))
+            gate, up = gate_up.split(INTERMEDIATE_SIZE, dim=0)
+            prefix = f"model.layers.{layer_index}.mlp.experts.{expert_index}"
+            for projection, source in (("gate_proj", gate), ("up_proj", up)):
+                tensor = _uniform_q8_target(source, torch)
+                encoded[f"{prefix}.{projection}.weight"] = tensor
+                source.copy_(_restore_target_tensor(tensor, source, torch))
             down = layer.mlp.experts.down_proj[expert_index]
-            down.copy_(_uniform_quantize_expert(down, bits=8, torch=torch))
+            tensor = _uniform_q8_target(down, torch)
+            encoded[f"{prefix}.down_proj.weight"] = tensor
+            down.copy_(_restore_target_tensor(tensor, down, torch))
 
 
 def _capture_layer15_statistics(
@@ -133,7 +169,9 @@ def _importance_by_expert(sumsq: Any, counts: Any, torch: Any) -> Any:
     )
 
 
-def _activation_weighted_q4(source: Any, importance: Any, torch: Any) -> Any:
+def _activation_weighted_q4(
+    source: Any, importance: Any, torch: Any
+) -> tuple[Any, TargetTensor]:
     rows, columns = source.shape
     groups = source.float().reshape(rows, columns // GROUP_SIZE, GROUP_SIZE)
     input_importance = importance.float().reshape(columns // GROUP_SIZE, GROUP_SIZE)
@@ -155,8 +193,23 @@ def _activation_weighted_q4(source: Any, importance: Any, torch: Any) -> Any:
         better = error < best_error
         best_error = torch.where(better, error, best_error)
         best_scale = torch.where(better.unsqueeze(-1), safe_scale, best_scale)
-    restored = torch.round(groups / best_scale).clamp(-7, 7) * best_scale
-    return restored.reshape(source.shape).to(source.dtype)
+    quantized = torch.round(groups / best_scale).clamp(-7, 7).to(torch.int8)
+    restored = quantized.to(torch.float32) * best_scale
+    tensor = TargetTensor(
+        shape=tuple(int(value) for value in source.shape),
+        encoding="q4_group128",
+        data=pack_int4(quantized.reshape(-1).detach().cpu().numpy()),
+        scales=(
+            best_scale.squeeze(-1)
+            .detach()
+            .cpu()
+            .numpy()
+            .astype("<f4", copy=False)
+            .tobytes()
+        ),
+        group_size=GROUP_SIZE,
+    )
+    return restored.reshape(source.shape).to(source.dtype), tensor
 
 
 def _source_q8_metrics(source: dict[str, Any]) -> dict[str, Any]:
@@ -168,7 +221,9 @@ def _source_q8_metrics(source: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _target_pack_tensors(model: Any) -> Any:
+def _target_pack_tensors(
+    model: Any, encoded: dict[str, TargetTensor]
+) -> Any:
     for layer_index, layer in enumerate(model.model.layers):
         for expert_index in range(EXPERT_COUNT):
             gate_up = layer.mlp.experts.gate_up_proj[expert_index]
@@ -179,9 +234,12 @@ def _target_pack_tensors(model: Any) -> Any:
             if tuple(down.shape) != (HIDDEN_SIZE, INTERMEDIATE_SIZE):
                 raise RuntimeError("fixed OLMoE down tensor shape changed")
             prefix = f"model.layers.{layer_index}.mlp.experts.{expert_index}"
-            yield f"{prefix}.gate_proj.weight", gate
-            yield f"{prefix}.up_proj.weight", up
-            yield f"{prefix}.down_proj.weight", down
+            for name, source in (
+                (f"{prefix}.gate_proj.weight", gate),
+                (f"{prefix}.up_proj.weight", up),
+                (f"{prefix}.down_proj.weight", down),
+            ):
+                yield name, encoded.get(name, source)
 
 
 def main() -> int:
@@ -279,8 +337,11 @@ def main() -> int:
     layer15 = model.model.layers[15]
     gate_backup = layer15.mlp.experts.gate_up_proj.detach().cpu().clone()
     down_backup = layer15.mlp.experts.down_proj.detach().cpu().clone()
+    encoded_tensors: dict[str, TargetTensor] = {}
     for layer_index in Q8_SOURCE_ORDER:
-        _quantize_layer_q8(model.model.layers[layer_index], torch)
+        _quantize_layer_q8(
+            model.model.layers[layer_index], layer_index, encoded_tensors, torch
+        )
     q8_base = _metrics(_capture_quality(model, evaluation, torch), reference, torch)
     source_q8 = _source_q8_metrics(source)
     q8_reproduced = math.isclose(
@@ -298,17 +359,28 @@ def main() -> int:
         layer15.mlp.experts.down_proj.copy_(down_backup.to(device="cuda:0"))
         for expert_index in range(EXPERT_COUNT):
             gate_up = layer15.mlp.experts.gate_up_proj[expert_index]
-            gate_up.copy_(
-                _activation_weighted_q4(
-                    gate_up, gate_importance[expert_index].to("cuda:0"), torch
+            gate, up = gate_up.split(INTERMEDIATE_SIZE, dim=0)
+            prefix = f"model.layers.15.mlp.experts.{expert_index}"
+            for projection, source in (("gate_proj", gate), ("up_proj", up)):
+                restored, tensor = _activation_weighted_q4(
+                    source, gate_importance[expert_index].to("cuda:0"), torch
                 )
-            )
+                source.copy_(restored)
+                encoded_tensors[f"{prefix}.{projection}.weight"] = tensor
             down = layer15.mlp.experts.down_proj[expert_index]
-            down.copy_(
-                _activation_weighted_q4(
-                    down, down_importance[expert_index].to("cuda:0"), torch
-                )
+            restored, tensor = _activation_weighted_q4(
+                down, down_importance[expert_index].to("cuda:0"), torch
             )
+            down.copy_(restored)
+            encoded_tensors[f"{prefix}.down_proj.weight"] = tensor
+    expected_encoded = {
+        f"model.layers.{layer}.mlp.experts.{expert}.{projection}.weight"
+        for layer in Q4_LAYERS + Q8_LAYERS
+        for expert in range(EXPERT_COUNT)
+        for projection in ("gate_proj", "up_proj", "down_proj")
+    }
+    if set(encoded_tensors) != expected_encoded:
+        raise RuntimeError("pre-encoded TargetPack tensor set is incomplete")
     metrics = _metrics(_capture_quality(model, evaluation, torch), reference, torch)
     effective_bpw = (
         len(Q4_LAYERS) * 4.25 + len(Q8_LAYERS) * 8.25 + len(BF16_LAYERS) * 16.0
@@ -413,7 +485,7 @@ def main() -> int:
         }
         manifest = write_target_pack(
             args.target_pack,
-            _target_pack_tensors(model),
+            _target_pack_tensors(model, encoded_tensors),
             model_id=MODEL_ID,
             model_revision=MODEL_REVISION,
             model_manifest_sha256=args.model_manifest_sha256,

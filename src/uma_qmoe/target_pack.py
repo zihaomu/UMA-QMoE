@@ -176,6 +176,52 @@ def decode_target_tensor(tensor: TargetTensor) -> Any:
     raise ContractError(f"unsupported TargetTensor encoding {tensor.encoding!r}")
 
 
+def _validate_preencoded_tensor(tensor: TargetTensor, encoding: str) -> None:
+    """Validate an already-quantized tensor without materializing its values."""
+
+    np = _numpy()
+    if tensor.encoding != encoding:
+        raise ContractError("pre-encoded TargetTensor does not match its layer policy")
+    if not tensor.shape or any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in tensor.shape
+    ):
+        raise ContractError("pre-encoded TargetTensor shape is invalid")
+    if encoding == "bf16_le":
+        if (
+            len(tensor.data) != tensor.element_count * 2
+            or tensor.scales
+            or tensor.group_size is not None
+        ):
+            raise ContractError("pre-encoded BF16 TargetTensor layout is invalid")
+        return
+    if tensor.group_size != DEFAULT_GROUP_SIZE:
+        raise ContractError("pre-encoded TargetTensor requires group size 128")
+    group_count = math.ceil(tensor.element_count / tensor.group_size)
+    scales = np.frombuffer(tensor.scales, dtype="<f4")
+    if len(tensor.scales) != group_count * 4 or not np.all(np.isfinite(scales)):
+        raise ContractError("pre-encoded TargetTensor scales are invalid")
+    if np.any(scales <= 0):
+        raise ContractError("pre-encoded TargetTensor scales must be positive")
+    if encoding == "q8_group128":
+        if len(tensor.data) != tensor.element_count:
+            raise ContractError("pre-encoded Q8 TargetTensor payload length is invalid")
+        return
+    expected_bytes = math.ceil(tensor.element_count / 2)
+    if len(tensor.data) != expected_bytes:
+        raise ContractError("pre-encoded Q4 TargetTensor payload length is invalid")
+    for offset in range(0, len(tensor.data), _SCAN_CHUNK_BYTES):
+        if (
+            tensor.data[offset : offset + _SCAN_CHUNK_BYTES]
+            .translate(_RESERVED_NIBBLE_TABLE)
+            .find(b"\x01")
+            != -1
+        ):
+            raise ContractError("pre-encoded Q4 TargetTensor contains reserved -8")
+    if tensor.element_count % 2 and tensor.data[-1] >> 4:
+        raise ContractError("pre-encoded Q4 TargetTensor has nonzero tail padding")
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -303,7 +349,11 @@ def write_target_pack(
                 if layer_index >= 16 or expert_index >= 64:
                     raise ContractError(f"TargetPack tensor identity is out of range: {name!r}")
                 encoding = layer_encodings[layer_index]
-                tensor = encode_target_tensor(values, encoding)
+                if isinstance(values, TargetTensor):
+                    tensor = values
+                    _validate_preencoded_tensor(tensor, encoding)
+                else:
+                    tensor = encode_target_tensor(values, encoding)
                 tensor_start = align_up(payload_size, tensor_alignment_bytes)
                 payload_write(bytes(tensor_start - payload_size))
                 data_offset = payload_size
