@@ -242,6 +242,14 @@ def test_packed_q4_fused_v2_requires_execution_strategy() -> None:
             "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-tiled-v4",
             "decode-two-launch-prefill-expert-tiled-three-stage",
         ),
+        (
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-gfx11-wmma-v5",
+            "decode-two-launch-prefill-gfx11-wmma-three-stage",
+        ),
+        (
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-pruned-tiled-v5",
+            "decode-two-launch-prefill-expert-tiled-pruned-three-stage",
+        ),
     ),
 )
 def test_packed_q4_routed_abis_require_prefill_evidence(
