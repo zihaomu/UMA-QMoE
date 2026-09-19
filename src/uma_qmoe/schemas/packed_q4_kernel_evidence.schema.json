@@ -27,8 +27,8 @@
         "platform": { "enum": ["hip_gfx1151", "cuda_sm121"] },
         "device_name": { "type": "string", "minLength": 1 },
         "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "abi": { "enum": ["q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-v1", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-tiled-v4", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-gfx11-wmma-v5", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-pruned-tiled-v5"] },
-        "execution_strategy": { "enum": ["two-launch-gate-up-swiglu-down-route", "decode-two-launch-prefill-expert-sorted-three-stage", "decode-two-launch-prefill-expert-tiled-three-stage", "decode-two-launch-prefill-gfx11-wmma-three-stage", "decode-two-launch-prefill-expert-tiled-pruned-three-stage"] },
+        "abi": { "enum": ["q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-v1", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-tiled-v4", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-gfx11-wmma-v5", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-pruned-tiled-v5", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-pruned-vector32-k64-v7"] },
+        "execution_strategy": { "enum": ["two-launch-gate-up-swiglu-down-route", "decode-two-launch-prefill-expert-sorted-three-stage", "decode-two-launch-prefill-expert-tiled-three-stage", "decode-two-launch-prefill-gfx11-wmma-three-stage", "decode-two-launch-prefill-expert-tiled-pruned-three-stage", "decode-two-launch-prefill-expert-vector32-k64-pruned-three-stage"] },
         "compiled_for_target": { "type": "boolean" },
         "reads_packed_weights_directly": { "type": "boolean" },
         "full_dequantized_weight_cache": { "type": "boolean" }

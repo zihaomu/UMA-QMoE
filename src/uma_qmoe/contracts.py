@@ -371,6 +371,9 @@ def validate_document(
             "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-pruned-tiled-v5": (
                 "decode-two-launch-prefill-expert-tiled-pruned-three-stage"
             ),
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-pruned-vector32-k64-v7": (
+                "decode-two-launch-prefill-expert-vector32-k64-pruned-three-stage"
+            ),
         }
         expected_strategy = strategy_by_abi.get(kernel["abi"])
         if expected_strategy is not None and (
@@ -424,6 +427,7 @@ def validate_document(
             "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-tiled-v4",
             "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-gfx11-wmma-v5",
             "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-pruned-tiled-v5",
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-pruned-vector32-k64-v7",
         }:
             prefill = correctness.get("prefill_moe_forward")
             prefill_samples = performance.get("prefill_samples_milliseconds")

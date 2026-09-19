@@ -262,10 +262,10 @@ def main() -> int:
         gates["overall_passed"] = all(gates.values())
         abi = (
             "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-"
-            "route-pruned-tiled-v5"
+            "route-pruned-vector32-k64-v7"
         )
         execution_strategy = (
-            "decode-two-launch-prefill-expert-tiled-pruned-three-stage"
+            "decode-two-launch-prefill-expert-vector32-k64-pruned-three-stage"
         )
         document = {
             "schema_version": 1,
