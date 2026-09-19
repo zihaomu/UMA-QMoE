@@ -54,6 +54,7 @@ SCHEMA_BY_KIND = {
     "route_coverage_policy_search": "route_coverage_policy_search.schema.json",
     "safe_uma_budget": "safe_uma_budget.schema.json",
     "target_inventory": "target_inventory.schema.json",
+    "target_pack_manifest": "target_pack_manifest.schema.json",
     "tensor_inventory": "tensor_inventory.schema.json",
     "traffic_source_ledger": "traffic_source_ledger.schema.json",
     "spark_traffic_model": "spark_traffic_model.schema.json",
@@ -1690,6 +1691,27 @@ def validate_document(
             document["payload_offset"] + document["payload_length"]
         ):
             raise ContractError("ExpertPack manifest artifact size is inconsistent")
+    elif kind == "target_pack_manifest":
+        header = document["header"]
+        if header["tensor_count"] != len(header["tensors"]):
+            raise ContractError("TargetPack manifest tensor count is inconsistent")
+        names = [tensor["name"] for tensor in header["tensors"]]
+        if len(names) != len(set(names)):
+            raise ContractError("TargetPack manifest contains duplicate tensor names")
+        observed_counts = {
+            encoding: sum(
+                tensor["encoding"] == encoding for tensor in header["tensors"]
+            )
+            for encoding in ("bf16_le", "q4_group128", "q8_group128")
+        }
+        if header["encoding_tensor_counts"] != observed_counts:
+            raise ContractError(
+                "TargetPack manifest encoding tensor counts are inconsistent"
+            )
+        if document["artifact"]["size_bytes"] != (
+            document["payload_offset"] + document["payload_length"]
+        ):
+            raise ContractError("TargetPack manifest artifact size is inconsistent")
     elif kind == "reference_host_baseline":
         from .baseline_common import validate_baseline_semantics
 

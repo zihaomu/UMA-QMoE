@@ -11,11 +11,15 @@ from typing import Any, Callable, Iterator
 from .contracts import ContractError
 from .expert_pack import ExpertPackReader
 from .q4 import dequantize_q4
+from .target_pack import TargetPackReader, decode_target_tensor
+
+
+PackReader = ExpertPackReader | TargetPackReader
 
 
 @dataclass
 class _PackState:
-    reader: ExpertPackReader
+    reader: PackReader
     active_calls: int = 0
     closing: bool = False
 
@@ -29,13 +33,19 @@ _REGISTERED = False
 _PERFORMANCE_BACKENDS: dict[str, Callable[..., Any]] = {}
 
 
-def register_expert_pack(reader: ExpertPackReader) -> int:
+def register_expert_pack(reader: PackReader) -> int:
     if reader.mapping_count != 1:
         raise ContractError("custom operator requires exactly one ExpertPack mapping")
     with _PACK_CONDITION:
         handle = next(_PACK_IDS)
         _PACKS[handle] = _PackState(reader=reader)
     return handle
+
+
+def register_target_pack(reader: TargetPackReader) -> int:
+    """Register one mixed TargetPack without creating another mapping."""
+
+    return register_expert_pack(reader)
 
 
 def unregister_expert_pack(handle: int) -> None:
@@ -84,7 +94,7 @@ def _lease_counts() -> dict[int, int]:
 
 
 @contextmanager
-def acquire_expert_pack(handle: int) -> Iterator[ExpertPackReader]:
+def acquire_expert_pack(handle: int) -> Iterator[PackReader]:
     """Hold one pack open across staging and asynchronous kernel submission."""
 
     counts = _lease_counts()
@@ -109,7 +119,7 @@ def acquire_expert_pack(handle: int) -> Iterator[ExpertPackReader]:
                 _PACK_CONDITION.notify_all()
 
 
-def expert_pack_for_handle(handle: int) -> ExpertPackReader:
+def expert_pack_for_handle(handle: int) -> PackReader:
     """Resolve a registered pack for an explicitly installed native backend."""
 
     if _lease_counts().get(handle, 0) == 0:
@@ -149,7 +159,7 @@ def _streaming_reference(
     expert_indices: Any,
     routing_weights: Any,
     layer_index: int,
-    reader: ExpertPackReader,
+    reader: PackReader,
 ) -> Any:
     """Correctness backend with per-expert transient dequantization.
 
@@ -185,9 +195,14 @@ def _streaming_reference(
         rows = locations[:, 0]
         slots = locations[:, 1]
         prefix = f"model.layers.{layer_index}.mlp.experts.{expert_index}"
-        gate_array = dequantize_q4(reader.tensor_q4(f"{prefix}.gate_proj.weight"))
-        up_array = dequantize_q4(reader.tensor_q4(f"{prefix}.up_proj.weight"))
-        down_array = dequantize_q4(reader.tensor_q4(f"{prefix}.down_proj.weight"))
+        if isinstance(reader, TargetPackReader):
+            gate_array = decode_target_tensor(reader.tensor(f"{prefix}.gate_proj.weight"))
+            up_array = decode_target_tensor(reader.tensor(f"{prefix}.up_proj.weight"))
+            down_array = decode_target_tensor(reader.tensor(f"{prefix}.down_proj.weight"))
+        else:
+            gate_array = dequantize_q4(reader.tensor_q4(f"{prefix}.gate_proj.weight"))
+            up_array = dequantize_q4(reader.tensor_q4(f"{prefix}.up_proj.weight"))
+            down_array = dequantize_q4(reader.tensor_q4(f"{prefix}.down_proj.weight"))
         gate = torch.from_numpy(gate_array).to(
             device=hidden_states.device, dtype=compute_dtype
         )
@@ -282,5 +297,6 @@ __all__ = [
     "register_expert_pack",
     "register_moe_forward",
     "register_performance_backend",
+    "register_target_pack",
     "unregister_expert_pack",
 ]

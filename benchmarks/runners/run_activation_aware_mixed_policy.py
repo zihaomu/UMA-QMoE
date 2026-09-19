@@ -26,6 +26,7 @@ from run_mixed_precision_sensitivity import (
     _tensor_sha256,
 )
 from uma_qmoe.contracts import canonical_sha256, validate_document
+from uma_qmoe.target_pack import write_target_pack
 
 
 LAYER_COUNT = 16
@@ -49,6 +50,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--reverse-layer-evidence", type=Path, required=True)
     parser.add_argument("--prompt-fixture", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--target-pack", type=Path)
+    parser.add_argument("--target-pack-manifest", type=Path)
+    parser.add_argument("--model-manifest-sha256")
     return parser
 
 
@@ -164,10 +168,42 @@ def _source_q8_metrics(source: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _target_pack_tensors(model: Any) -> Any:
+    for layer_index, layer in enumerate(model.model.layers):
+        for expert_index in range(EXPERT_COUNT):
+            gate_up = layer.mlp.experts.gate_up_proj[expert_index]
+            if tuple(gate_up.shape) != (INTERMEDIATE_SIZE * 2, HIDDEN_SIZE):
+                raise RuntimeError("fixed OLMoE gate/up tensor shape changed")
+            gate, up = gate_up.split(INTERMEDIATE_SIZE, dim=0)
+            down = layer.mlp.experts.down_proj[expert_index]
+            if tuple(down.shape) != (HIDDEN_SIZE, INTERMEDIATE_SIZE):
+                raise RuntimeError("fixed OLMoE down tensor shape changed")
+            prefix = f"model.layers.{layer_index}.mlp.experts.{expert_index}"
+            yield f"{prefix}.gate_proj.weight", gate
+            yield f"{prefix}.up_proj.weight", up
+            yield f"{prefix}.down_proj.weight", down
+
+
 def main() -> int:
     args = _parser().parse_args()
+    pack_arguments = (
+        args.target_pack,
+        args.target_pack_manifest,
+        args.model_manifest_sha256,
+    )
+    if any(value is not None for value in pack_arguments) and not all(
+        value is not None for value in pack_arguments
+    ):
+        raise SystemExit(
+            "--target-pack, --target-pack-manifest, and "
+            "--model-manifest-sha256 must be supplied together"
+        )
     if args.output.exists():
         raise SystemExit("refusing to overwrite mixed-policy evidence")
+    if args.target_pack is not None and (
+        args.target_pack.exists() or args.target_pack_manifest.exists()
+    ):
+        raise SystemExit("refusing to overwrite TargetPack artifacts")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     source = json.loads(args.reverse_layer_evidence.read_text(encoding="utf-8"))
     validate_document(source)
@@ -364,6 +400,32 @@ def main() -> int:
         "gates": gates,
     }
     validate_document(document)
+    if args.target_pack is not None:
+        layer_encodings = {
+            layer: (
+                "q4_group128"
+                if layer in Q4_LAYERS
+                else "q8_group128"
+                if layer in Q8_LAYERS
+                else "bf16_le"
+            )
+            for layer in range(LAYER_COUNT)
+        }
+        manifest = write_target_pack(
+            args.target_pack,
+            _target_pack_tensors(model),
+            model_id=MODEL_ID,
+            model_revision=MODEL_REVISION,
+            model_manifest_sha256=args.model_manifest_sha256,
+            policy_id=document["policy"]["policy_id"],
+            layer_encodings=layer_encodings,
+            policy_evidence_sha256=canonical_sha256(document),
+        )
+        args.target_pack_manifest.parent.mkdir(parents=True, exist_ok=True)
+        args.target_pack_manifest.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
     args.output.write_text(
         json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n",
         encoding="utf-8",

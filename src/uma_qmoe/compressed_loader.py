@@ -15,6 +15,11 @@ from .custom_op import (
     unregister_expert_pack,
 )
 from .expert_pack import ExpertPackReader
+from .target_pack import MAGIC as TARGET_PACK_MAGIC
+from .target_pack import TargetPackReader
+
+
+PackReader = ExpertPackReader | TargetPackReader
 
 
 MODEL_ID = "allenai/OLMoE-1B-7B-0125"
@@ -166,7 +171,7 @@ def _restore_fixed_nonpersistent_buffers(model: Any, config: Any, device: str) -
 @dataclass
 class FixedOlmoeHost:
     model: Any
-    expert_pack: ExpertPackReader
+    expert_pack: PackReader
     pack_handle: int
     evidence: dict[str, Any]
 
@@ -188,6 +193,7 @@ def load_fixed_olmoe(
     model_manifest_sha256: str,
     device: str = "cuda:0",
     performance_mode: bool = False,
+    target_policy_id: str | None = None,
 ) -> FixedOlmoeHost:
     """Load dense BF16 tensors and one ExpertPack mapping, skipping experts pre-read."""
 
@@ -210,12 +216,31 @@ def load_fixed_olmoe(
     if observed != ("olmoe", 16, 64, 8):
         raise ContractError(f"unexpected fixed OLMoE architecture {observed!r}")
 
-    reader = ExpertPackReader(
-        pack_path,
-        expected_model_id=MODEL_ID,
-        expected_model_revision=MODEL_REVISION,
-        expected_model_manifest_sha256=model_manifest_sha256,
-    )
+    try:
+        with pack_path.open("rb") as pack_stream:
+            magic = pack_stream.read(8)
+    except OSError as exc:
+        raise ContractError(f"cannot read compressed expert pack {pack_path}: {exc}") from exc
+    if magic == TARGET_PACK_MAGIC:
+        if not target_policy_id:
+            raise ContractError("mixed TargetPack loading requires an expected policy id")
+        reader: PackReader = TargetPackReader(
+            pack_path,
+            expected_model_id=MODEL_ID,
+            expected_model_revision=MODEL_REVISION,
+            expected_model_manifest_sha256=model_manifest_sha256,
+            expected_policy_id=target_policy_id,
+        )
+        reader.validate_fixed_olmoe_complete()
+    else:
+        if target_policy_id is not None:
+            raise ContractError("canonical ExpertPack cannot satisfy a TargetPack policy id")
+        reader = ExpertPackReader(
+            pack_path,
+            expected_model_id=MODEL_ID,
+            expected_model_revision=MODEL_REVISION,
+            expected_model_manifest_sha256=model_manifest_sha256,
+        )
     register_moe_forward()
     pack_handle = register_expert_pack(reader)
     try:
