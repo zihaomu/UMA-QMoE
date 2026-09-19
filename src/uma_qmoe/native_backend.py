@@ -660,11 +660,12 @@ class MixedTargetNativeBackend:
         return existing
 
     @staticmethod
-    def _bf16_forward(
+    def _grouped_bf16_forward(
         hidden_states: Any,
         expert_indices: Any,
         routing_weights: Any,
-        layer: _DeviceBF16Layer,
+        gate_up_weights: Any,
+        down_weights: Any,
     ) -> Any:
         import torch
         flattened = hidden_states.reshape(-1, hidden_states.shape[-1])
@@ -684,13 +685,13 @@ class MixedTargetNativeBackend:
         offsets = torch.cumsum(tokens_per_expert, dim=0, dtype=torch.int32)
 
         gate_up = torch._grouped_mm(
-            selected_hidden, layer.gate_up.transpose(-2, -1), offs=offsets
+            selected_hidden, gate_up_weights.transpose(-2, -1), offs=offsets
         )
         gate, up = gate_up.chunk(2, dim=-1)
         intermediate = torch.nn.functional.silu(gate)
         intermediate.mul_(up)
         projected = torch._grouped_mm(
-            intermediate, layer.down.transpose(-2, -1), offs=offsets
+            intermediate, down_weights.transpose(-2, -1), offs=offsets
         )
         projected.mul_(grouped_weights.unsqueeze(-1))
         inverse_permutation = torch.empty_like(permutation)
@@ -701,6 +702,103 @@ class MixedTargetNativeBackend:
         return ordered.view(flattened.shape[0], top_k, 2048).sum(dim=1).reshape(
             hidden_states.shape
         )
+
+    @staticmethod
+    def _q8_to_bf16(
+        quantized: Any,
+        scales: Any,
+        *,
+        output_features: int,
+        input_features: int,
+    ) -> Any:
+        import torch
+
+        grouped = quantized.view(64, output_features, input_features // 128, 128)
+        dequantized = grouped.to(dtype=torch.float32)
+        dequantized.mul_(
+            scales.view(64, output_features, input_features // 128, 1).to(
+                dtype=torch.float32
+            )
+        )
+        return dequantized.to(dtype=torch.bfloat16).reshape(
+            64, output_features, input_features
+        )
+
+    @staticmethod
+    def _q4_values(packed: Any) -> Any:
+        import torch
+
+        nibbles = torch.stack((packed & 0x0F, packed >> 4), dim=-1).reshape(-1)
+        values = nibbles.to(dtype=torch.int8)
+        values.sub_((values >= 8).to(dtype=torch.int8) * 16)
+        return values
+
+    @classmethod
+    def _q4_to_bf16(
+        cls,
+        packed: Any,
+        scales: Any,
+        *,
+        output_features: int,
+        input_features: int,
+    ) -> Any:
+        import torch
+
+        quantized = cls._q4_values(packed)
+        grouped = quantized.view(64, output_features, input_features // 128, 128)
+        dequantized = grouped.to(dtype=torch.float32)
+        dequantized.mul_(
+            scales.view(64, output_features, input_features // 128, 1).to(
+                dtype=torch.float32
+            )
+        )
+        return dequantized.to(dtype=torch.bfloat16).reshape(
+            64, output_features, input_features
+        )
+
+    @classmethod
+    def _transient_grouped_weights(
+        cls,
+        layer: _DeviceQ4Layer | _DeviceQ8Layer,
+        *,
+        encoding: str,
+        device: Any,
+    ) -> tuple[Any, Any]:
+        import torch
+
+        convert = cls._q4_to_bf16 if encoding == "q4_group128" else cls._q8_to_bf16
+        gate_up = torch.empty(
+            (64, 2048, 2048), dtype=torch.bfloat16, device=device
+        )
+        gate_up[:, :1024].copy_(
+            convert(
+                layer.gate_packed
+                if isinstance(layer, _DeviceQ4Layer)
+                else layer.gate_quantized,
+                layer.gate_scales,
+                output_features=1024,
+                input_features=2048,
+            )
+        )
+        gate_up[:, 1024:].copy_(
+            convert(
+                layer.up_packed
+                if isinstance(layer, _DeviceQ4Layer)
+                else layer.up_quantized,
+                layer.up_scales,
+                output_features=1024,
+                input_features=2048,
+            )
+        )
+        down = convert(
+            layer.down_packed
+            if isinstance(layer, _DeviceQ4Layer)
+            else layer.down_quantized,
+            layer.down_scales,
+            output_features=2048,
+            input_features=1024,
+        )
+        return gate_up, down
 
     @staticmethod
     def _sorted_routes(
@@ -773,11 +871,15 @@ class MixedTargetNativeBackend:
                 layer = self._device_bf16_layer(
                     pack_handle, layer_index, hidden_states.device, reader
                 )
+            elif encoding == "q4_group128" and flattened.shape[0] > 1:
+                layer = self._q4._device_layer(
+                    pack_handle, layer_index, hidden_states.device, reader
+                )
             elif encoding != "q4_group128":
                 raise RuntimeError(
                     f"unsupported TargetPack layer encoding {encoding!r}"
                 )
-        if encoding == "q4_group128":
+        if encoding == "q4_group128" and flattened.shape[0] == 1:
             return self._q4(
                 hidden_states,
                 expert_indices,
@@ -791,8 +893,15 @@ class MixedTargetNativeBackend:
         indices = expert_indices.to(dtype=torch.int64).contiguous()
         weights = routing_weights.to(dtype=torch.bfloat16).contiguous()
         if encoding == "bf16_le":
-            return self._bf16_forward(
-                hidden_states, indices, weights, layer
+            return self._grouped_bf16_forward(
+                hidden_states, indices, weights, layer.gate_up, layer.down
+            ).reshape(hidden_states.shape)
+        if flattened.shape[0] > 1:
+            gate_up, down = self._transient_grouped_weights(
+                layer, encoding=encoding, device=hidden_states.device
+            )
+            return self._grouped_bf16_forward(
+                hidden_states, indices, weights, gate_up, down
             ).reshape(hidden_states.shape)
         arguments = (
             flattened.contiguous(),
