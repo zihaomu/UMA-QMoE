@@ -1799,6 +1799,20 @@ def validate_document(
         from .baseline_common import validate_baseline_semantics
 
         validate_baseline_semantics(document, "Compressed Host Baseline")
+        if document["schema_version"] == 1:
+            expected_quantization = "canonical_q4_group128"
+            expected_policy = None
+        else:
+            expected_quantization = "mixed_target_pack_q4_q8_bf16"
+            expected_policy = "olmoe-layer15-awq-q4-q8-bf16-v2"
+        model = document["model"]
+        if (
+            model["expert_quantization"] != expected_quantization
+            or model.get("target_policy_id") != expected_policy
+        ):
+            raise ContractError(
+                "Compressed Host schema version does not match its expert policy"
+            )
         loader = document["loader"]
         cache = document["backend_cache"]
         gates = document["gates"]

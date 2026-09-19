@@ -443,6 +443,7 @@ def _build_parser() -> argparse.ArgumentParser:
     compressed_host_parser.add_argument("--model-id", required=True)
     compressed_host_parser.add_argument("--model-revision", required=True)
     compressed_host_parser.add_argument("--expert-pack-sha256", required=True)
+    compressed_host_parser.add_argument("--target-policy-id")
     compressed_host_parser.add_argument("--input-tokens", type=int, required=True)
     compressed_host_parser.add_argument("--output-tokens", type=int, required=True)
     compressed_host_parser.add_argument(
@@ -1062,6 +1063,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 model_id=arguments.model_id,
                 model_revision=arguments.model_revision,
                 expert_pack_sha256=arguments.expert_pack_sha256,
+                target_policy_id=arguments.target_policy_id,
                 input_tokens=arguments.input_tokens,
                 output_tokens=arguments.output_tokens,
                 warmup_requests=arguments.warmup_requests,
