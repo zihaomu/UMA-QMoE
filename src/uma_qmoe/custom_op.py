@@ -33,6 +33,21 @@ _REGISTERED = False
 _PERFORMANCE_BACKENDS: dict[str, Callable[..., Any]] = {}
 
 
+def _combine_gate_up_arrays(gate: Any, up: Any) -> Any:
+    import numpy as np
+
+    if gate.shape != up.shape:
+        raise RuntimeError("Gate and Up projection shapes must match")
+    return np.concatenate((gate, up), axis=0)
+
+
+def _fused_gate_up(selected: Any, gate_up: Any, functional: Any) -> Any:
+    gate, up = functional.linear(selected, gate_up).chunk(2, dim=-1)
+    intermediate = functional.silu(gate)
+    intermediate.mul_(up)
+    return intermediate
+
+
 def register_expert_pack(reader: PackReader) -> int:
     if reader.mapping_count != 1:
         raise ContractError("custom operator requires exactly one ExpertPack mapping")
@@ -203,22 +218,18 @@ def _streaming_reference(
             gate_array = dequantize_q4(reader.tensor_q4(f"{prefix}.gate_proj.weight"))
             up_array = dequantize_q4(reader.tensor_q4(f"{prefix}.up_proj.weight"))
             down_array = dequantize_q4(reader.tensor_q4(f"{prefix}.down_proj.weight"))
-        gate = torch.from_numpy(gate_array).to(
-            device=hidden_states.device, dtype=compute_dtype
-        )
-        up = torch.from_numpy(up_array).to(
+        gate_up = torch.from_numpy(_combine_gate_up_arrays(gate_array, up_array)).to(
             device=hidden_states.device, dtype=compute_dtype
         )
         down = torch.from_numpy(down_array).to(
             device=hidden_states.device, dtype=compute_dtype
         )
         selected = flattened.index_select(0, rows).to(compute_dtype)
-        intermediate = functional.silu(functional.linear(selected, gate))
-        intermediate.mul_(functional.linear(selected, up))
+        intermediate = _fused_gate_up(selected, gate_up, functional)
         expert_output = functional.linear(intermediate, down)
         weights = routing_weights[rows, slots].to(compute_dtype).unsqueeze(-1)
         output.index_add_(0, rows, expert_output * weights)
-        del gate, up, down, gate_array, up_array, down_array
+        del gate_up, down, gate_array, up_array, down_array
     return output.to(output_dtype).reshape(hidden_states.shape)
 
 
