@@ -15,6 +15,7 @@ from typing import Any
 
 from uma_qmoe.contracts import validate_document
 from uma_qmoe.expert_pack import ExpertPackReader
+from uma_qmoe.numeric import clamp_cosine_similarity
 from uma_qmoe.q4 import dequantize_q4
 
 
@@ -106,10 +107,12 @@ def _metrics(
     absolute = (candidate_logits - reference_logits).abs().reshape(-1)
     p99_index = max(0, math.ceil(0.99 * absolute.numel()) - 1)
     p99 = float(torch.sort(absolute).values[p99_index].item())
-    cosine = float(
-        torch.nn.functional.cosine_similarity(
-            candidate_logits.reshape(1, -1), reference_logits.reshape(1, -1)
-        ).item()
+    cosine = clamp_cosine_similarity(
+        float(
+            torch.nn.functional.cosine_similarity(
+                candidate_logits.reshape(1, -1), reference_logits.reshape(1, -1)
+            ).item()
+        )
     )
     exact_count = 0
     decision_count = 0
