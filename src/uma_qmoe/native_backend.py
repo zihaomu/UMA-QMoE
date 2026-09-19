@@ -12,6 +12,7 @@ from typing import Any
 
 from .contracts import ContractError
 from .custom_op import acquire_expert_pack, register_performance_backend
+from .target_pack import TargetPackReader
 
 
 _SOURCE_NAMES = ("packed_q4_binding.cpp", "packed_q4_kernel.cu")
@@ -221,7 +222,11 @@ class PackedQ4NativeBackend:
             scales=scales_host.to(device=device, non_blocking=False),
             output_features=int(shape[0]),
             input_features=int(shape[1]),
-            group_size=int(reader.header["quantization"]["group_size"]),
+            group_size=(
+                128
+                if isinstance(reader, TargetPackReader)
+                else int(reader.header["quantization"]["group_size"])
+            ),
         )
         with self._lock:
             existing = self._cache.setdefault(key, value)
@@ -293,7 +298,16 @@ class PackedQ4NativeBackend:
             return cached
         if not 0 <= layer_index < 16:
             raise RuntimeError("OLMoE layer_index must be in [0, 15]")
-        group_size = int(reader.header["quantization"]["group_size"])
+        if isinstance(reader, TargetPackReader):
+            encoding = reader.layer_encoding(layer_index)
+            if encoding != "q4_group128":
+                raise RuntimeError(
+                    "packed Q4 backend cannot execute TargetPack layer "
+                    f"{layer_index} encoded as {encoding}; install the mixed backend"
+                )
+            group_size = 128
+        else:
+            group_size = int(reader.header["quantization"]["group_size"])
         if group_size != 128:
             raise RuntimeError(
                 f"fused packed Q4 backend requires group size 128, got {group_size}"
