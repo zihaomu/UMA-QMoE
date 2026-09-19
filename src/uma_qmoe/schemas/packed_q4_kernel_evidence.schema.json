@@ -27,8 +27,8 @@
         "platform": { "enum": ["hip_gfx1151", "cuda_sm121"] },
         "device_name": { "type": "string", "minLength": 1 },
         "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "abi": { "enum": ["q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-v1", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2"] },
-        "execution_strategy": { "const": "two-launch-gate-up-swiglu-down-route" },
+        "abi": { "enum": ["q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-v1", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2", "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3"] },
+        "execution_strategy": { "enum": ["two-launch-gate-up-swiglu-down-route", "decode-two-launch-prefill-expert-sorted-three-stage"] },
         "compiled_for_target": { "type": "boolean" },
         "reads_packed_weights_directly": { "type": "boolean" },
         "full_dequantized_weight_cache": { "type": "boolean" }
@@ -41,6 +41,7 @@
       "properties": {
         "layer_index": { "type": "integer", "minimum": 0, "maximum": 15 },
         "tokens": { "type": "integer", "minimum": 1 },
+        "prefill_tokens": { "type": "integer", "minimum": 2 },
         "top_k": { "const": 8 },
         "unique_experts": { "type": "integer", "minimum": 1, "maximum": 8 },
         "warmup_iterations": { "type": "integer", "minimum": 1 },
@@ -80,6 +81,17 @@
             "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
           }
         },
+        "prefill_moe_forward": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finite", "max_absolute_error", "cosine_similarity", "output_sha256"],
+          "properties": {
+            "finite": { "type": "boolean" },
+            "max_absolute_error": { "type": "number", "minimum": 0 },
+            "cosine_similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+            "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
         "acceptance": {
           "type": "object",
           "additionalProperties": false,
@@ -100,6 +112,9 @@
         "samples_milliseconds": { "type": "array", "minItems": 3, "items": { "type": "number", "exclusiveMinimum": 0 } },
         "median_milliseconds": { "type": "number", "exclusiveMinimum": 0 },
         "p95_milliseconds": { "type": "number", "exclusiveMinimum": 0 },
+        "prefill_samples_milliseconds": { "type": "array", "minItems": 3, "items": { "type": "number", "exclusiveMinimum": 0 } },
+        "prefill_median_milliseconds": { "type": "number", "exclusiveMinimum": 0 },
+        "prefill_p95_milliseconds": { "type": "number", "exclusiveMinimum": 0 },
         "compressed_cache_tensor_count": { "type": "integer", "minimum": 3 },
         "compressed_cache_bytes": { "type": "integer", "minimum": 1 },
         "dequantized_weight_cache_bytes": { "const": 0 },
@@ -117,7 +132,9 @@
         "no_dequantized_weight_cache": { "type": "boolean" },
         "projection_correctness": { "type": "boolean" },
         "moe_correctness": { "type": "boolean" },
+        "prefill_moe_correctness": { "type": "boolean" },
         "performance_mode_executed": { "type": "boolean" },
+        "prefill_performance_mode_executed": { "type": "boolean" },
         "overall_passed": { "type": "boolean" }
       }
     }

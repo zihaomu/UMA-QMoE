@@ -355,14 +355,20 @@ def validate_document(
             raise ContractError("Custom operator status is inconsistent")
     elif kind == "packed_q4_kernel_evidence":
         kernel = document["kernel"]
-        if (
-            kernel["abi"]
-            == "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2"
-            and kernel.get("execution_strategy")
-            != "two-launch-gate-up-swiglu-down-route"
+        strategy_by_abi = {
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2": (
+                "two-launch-gate-up-swiglu-down-route"
+            ),
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3": (
+                "decode-two-launch-prefill-expert-sorted-three-stage"
+            ),
+        }
+        expected_strategy = strategy_by_abi.get(kernel["abi"])
+        if expected_strategy is not None and (
+            kernel.get("execution_strategy") != expected_strategy
         ):
             raise ContractError(
-                "Packed Q4 fused v2 evidence must declare its execution strategy"
+                "Packed Q4 fused evidence must declare its execution strategy"
             )
         correctness = document["correctness"]
         performance = document["performance"]
@@ -397,6 +403,44 @@ def validate_document(
             performance["p95_milliseconds"], expected_p95, rel_tol=1e-9
         ):
             raise ContractError("Packed Q4 timing summary does not match samples")
+        prefill_expected: dict[str, bool] = {}
+        if kernel["abi"].endswith("route-specialized-v3"):
+            prefill = correctness.get("prefill_moe_forward")
+            prefill_samples = performance.get("prefill_samples_milliseconds")
+            if (
+                document["workload"].get("prefill_tokens", 0) < 2
+                or not isinstance(prefill, dict)
+                or not isinstance(prefill_samples, list)
+            ):
+                raise ContractError(
+                    "Packed Q4 v3 evidence must include a prefill workload"
+                )
+            prefill_correctness = (
+                prefill["finite"]
+                and prefill["max_absolute_error"]
+                <= acceptance["max_absolute_error"]
+                and prefill["cosine_similarity"]
+                >= acceptance["minimum_cosine_similarity"]
+            )
+            prefill_median = statistics.median(prefill_samples)
+            prefill_p95 = _nearest_rank_percentile(prefill_samples, 0.95)
+            if not math.isclose(
+                performance.get("prefill_median_milliseconds", math.nan),
+                prefill_median,
+                rel_tol=1e-9,
+            ) or not math.isclose(
+                performance.get("prefill_p95_milliseconds", math.nan),
+                prefill_p95,
+                rel_tol=1e-9,
+            ):
+                raise ContractError(
+                    "Packed Q4 prefill timing summary does not match samples"
+                )
+            prefill_expected = {
+                "prefill_moe_correctness": prefill_correctness,
+                "prefill_performance_mode_executed": len(prefill_samples)
+                == document["workload"]["measured_iterations"],
+            }
         expected = {
             "target_architecture": kernel["platform"] == expected_platform,
             "target_compilation": kernel["compiled_for_target"],
@@ -409,6 +453,7 @@ def validate_document(
             "moe_correctness": moe_correctness,
             "performance_mode_executed": len(samples)
             == document["workload"]["measured_iterations"],
+            **prefill_expected,
         }
         if any(gates[name] != value for name, value in expected.items()):
             raise ContractError("Packed Q4 gate does not match measured evidence")
