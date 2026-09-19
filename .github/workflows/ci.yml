@@ -56,7 +56,7 @@ jobs:
           while IFS= read -r document; do
             uv run --frozen umaq validate "$document"
           done < <(
-            find benchmarks/budgets benchmarks/contracts benchmarks/policies benchmarks/traces \
+            find benchmarks/budgets benchmarks/contracts benchmarks/policies benchmarks/sources benchmarks/traces \
               models/estimates models/inventories models/manifests \
               -type f \( -name '*.json' -o -name '*.yaml' -o -name '*.yml' \) \
               -print | LC_ALL=C sort

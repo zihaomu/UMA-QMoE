@@ -20,6 +20,7 @@ SCHEMA_BY_KIND = {
     "artifact_verification": "artifact_verification.schema.json",
     "bandwidth_soak": "bandwidth_soak.schema.json",
     "benchmark_contract": "benchmark_contract.schema.json",
+    "compressed_host_baseline": "compressed_host_baseline.schema.json",
     "compressed_loader_evidence": "compressed_loader_evidence.schema.json",
     "custom_operator_evidence": "custom_operator_evidence.schema.json",
     "external_baseline": "external_baseline.schema.json",
@@ -31,6 +32,7 @@ SCHEMA_BY_KIND = {
     "model_acquisition": "model_acquisition.schema.json",
     "model_derivation": "model_derivation.schema.json",
     "memory_snapshot": "memory_snapshot.schema.json",
+    "mixed_precision_refinement": "mixed_precision_refinement.schema.json",
     "mixed_precision_sensitivity": "mixed_precision_sensitivity.schema.json",
     "native_stream_benchmark": "native_stream_benchmark.schema.json",
     "model_manifest": "model_manifest.schema.json",
@@ -46,6 +48,8 @@ SCHEMA_BY_KIND = {
     "safe_uma_budget": "safe_uma_budget.schema.json",
     "target_inventory": "target_inventory.schema.json",
     "tensor_inventory": "tensor_inventory.schema.json",
+    "traffic_source_ledger": "traffic_source_ledger.schema.json",
+    "spark_traffic_model": "spark_traffic_model.schema.json",
     "weight_traffic_estimate": "weight_traffic_estimate.schema.json",
 }
 
@@ -120,6 +124,27 @@ def _require_project_relative_path(path: str, field: str) -> None:
         or any(segment in {"", ".", ".."} for segment in segments)
     ):
         raise ContractError(f"{field} must be a safe project-relative POSIX path")
+
+
+def _validate_refinement_delta(
+    row: Mapping[str, Any], baseline: Mapping[str, Any]
+) -> None:
+    metrics = row["metrics"]
+    expected = {
+        "router_exact_set_agreement": metrics["router_exact_set_agreement"]
+        - baseline["router_exact_set_agreement"],
+        "router_mean_set_overlap": metrics["router_mean_set_overlap"]
+        - baseline["router_mean_set_overlap"],
+        "logit_cosine_similarity": metrics["logit_cosine_similarity"]
+        - baseline["logit_cosine_similarity"],
+    }
+    if any(
+        not math.isclose(
+            row["delta_vs_all_q4"][name], value, rel_tol=1e-9, abs_tol=1e-12
+        )
+        for name, value in expected.items()
+    ):
+        raise ContractError("Mixed-precision refinement delta is inconsistent")
 
 
 def validate_document(
@@ -400,6 +425,99 @@ def validate_document(
             raise ContractError("Mixed-precision overall gate is inconsistent")
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Mixed-precision status is inconsistent")
+    elif kind == "mixed_precision_refinement":
+        baseline = document["all_q4_baseline"]
+        order = document["method"]["layer_order"]
+        cumulative = document["cumulative_layer_rows"]
+        experts = document["layer2_expert_rows"]
+        if order[0] != 2 or sorted(order) != list(range(16)):
+            raise ContractError(
+                "Mixed-precision refinement must cover layers 0-15 from layer 2"
+            )
+        expected_layers: list[int] = []
+        for index, row in enumerate(cumulative):
+            expected_layers.append(order[index])
+            if (
+                row["added_layer"] != order[index]
+                or row["restored_layers"] != expected_layers
+            ):
+                raise ContractError(
+                    "Mixed-precision cumulative layer progression is inconsistent"
+                )
+            _validate_refinement_delta(row, baseline)
+        expert_ids = [row["restored_expert"] for row in experts]
+        if sorted(expert_ids) != list(range(64)):
+            raise ContractError(
+                "Mixed-precision refinement must cover layer-2 experts 0-63"
+            )
+        for row in experts:
+            _validate_refinement_delta(row, baseline)
+        expected_ranking = [
+            row["restored_expert"]
+            for row in sorted(
+                experts,
+                key=lambda row: (
+                    -row["delta_vs_all_q4"]["router_exact_set_agreement"],
+                    -row["delta_vs_all_q4"]["logit_cosine_similarity"],
+                    -row["reference_route_count"],
+                    row["restored_expert"],
+                ),
+            )
+        ]
+        if document["layer2_expert_ranking"] != expected_ranking:
+            raise ContractError(
+                "Mixed-precision layer-2 expert ranking is inconsistent"
+            )
+        quality_gate = document["quality_gate"]
+        qualifying = [
+            row
+            for row in cumulative
+            if row["metrics"]["router_exact_set_agreement"]
+            >= quality_gate["minimum_router_exact_set_agreement"]
+        ]
+        expected_first = qualifying[0]["restored_layers"] if qualifying else None
+        if quality_gate["first_passing_restored_layers"] != expected_first:
+            raise ContractError("Mixed-precision quality gate result is inconsistent")
+        gates = document["gates"]
+        expected = {
+            "reference_finite": document["reference"]["finite"],
+            "all_q4_finite": baseline["finite"],
+            "layer2_first": order[0] == 2,
+            "all_layers_covered": len(cumulative) == 16,
+            "all_layer2_experts_covered": len(experts) == 64,
+            "matrix_finite": all(row["finite"] for row in cumulative + experts),
+            "quality_gate_unchanged": math.isclose(
+                quality_gate["minimum_router_exact_set_agreement"], 0.99
+            ),
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError(
+                "Mixed-precision refinement gate does not match evidence"
+            )
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError(
+                "Mixed-precision refinement overall gate is inconsistent"
+            )
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Mixed-precision refinement status is inconsistent")
+    elif kind == "traffic_source_ledger":
+        from .traffic_model import (
+            TrafficModelError,
+            validate_traffic_source_ledger,
+        )
+
+        try:
+            validate_traffic_source_ledger(document)
+        except TrafficModelError as exc:
+            raise ContractError(str(exc)) from exc
+    elif kind == "spark_traffic_model":
+        from .traffic_model import TrafficModelError, validate_spark_traffic_model
+
+        try:
+            validate_spark_traffic_model(document)
+        except TrafficModelError as exc:
+            raise ContractError(str(exc)) from exc
     elif kind == "run_manifest":
         forbidden_fragments = (
             "SECRET",
@@ -527,6 +645,32 @@ def validate_document(
         from .baseline_common import validate_baseline_semantics
 
         validate_baseline_semantics(document, "Reference Host Baseline")
+    elif kind == "compressed_host_baseline":
+        from .baseline_common import validate_baseline_semantics
+
+        validate_baseline_semantics(document, "Compressed Host Baseline")
+        loader = document["loader"]
+        cache = document["backend_cache"]
+        gates = document["gates"]
+        expected = {
+            "packed_backend_registered": document["implementation"]["platform"]
+            in {"cuda_sm121", "hip_gfx1151"},
+            "performance_mode_executed": loader["performance_mode"],
+            "no_silent_fallback": document["implementation"]["fallback_count"] == 0,
+            "cache_stable_after_warmup": cache["after_warmup"]
+            == cache["after_measurement"],
+            "no_dequantized_weight_cache": cache["after_measurement"][
+                "dequantized_weight_bytes"
+            ]
+            == 0,
+            "dense_only_checkpoint_load": loader["loaded_expert_tensor_count"] == 0,
+            "no_expert_parameters": loader["expert_parameter_count"] == 0,
+            "single_pack_mapping": loader["expert_pack_mapping_count"] == 1,
+            "within_safe_uma_budget": document["memory"]["peak_bytes"]
+            <= document["resource_policy"]["safe_uma_budget_bytes"],
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Compressed Host gate does not match measured evidence")
     elif kind == "target_inventory":
         target_ids = [target["id"] for target in document["targets"]]
         ssh_hosts = [target["ssh_host"] for target in document["targets"]]

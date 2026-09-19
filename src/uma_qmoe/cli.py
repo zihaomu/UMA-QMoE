@@ -429,6 +429,53 @@ def _build_parser() -> argparse.ArgumentParser:
     reference_host_run_parser.add_argument("--model-manifest-sha256", required=True)
     reference_host_run_parser.add_argument("--output", default="-")
 
+    compressed_host_parser = subparsers.add_parser(
+        "normalize-compressed-host-baseline",
+        help="normalize the fixed packed native UMA-QMoE host baseline",
+    )
+    compressed_host_parser.add_argument("run_directory", type=Path)
+    compressed_host_parser.add_argument("--target-id", required=True)
+    compressed_host_parser.add_argument("--source-commit", required=True)
+    compressed_host_parser.add_argument(
+        "--backend", choices=("cuda", "hip"), required=True
+    )
+    compressed_host_parser.add_argument("--container-image", required=True)
+    compressed_host_parser.add_argument("--model-id", required=True)
+    compressed_host_parser.add_argument("--model-revision", required=True)
+    compressed_host_parser.add_argument("--expert-pack-sha256", required=True)
+    compressed_host_parser.add_argument("--input-tokens", type=int, required=True)
+    compressed_host_parser.add_argument("--output-tokens", type=int, required=True)
+    compressed_host_parser.add_argument(
+        "--warmup-requests", type=int, required=True
+    )
+    compressed_host_parser.add_argument(
+        "--measured-requests", type=int, required=True
+    )
+    compressed_host_parser.add_argument(
+        "--safe-uma-budget-bytes", type=int, default=32 * 1024**3
+    )
+    compressed_host_parser.add_argument("--output", default="-")
+
+    compressed_host_run_parser = subparsers.add_parser(
+        "build-compressed-host-run-manifest",
+        help="bind CompressedHostBaseline evidence and raw files into RunManifest v1",
+    )
+    compressed_host_run_parser.add_argument("baseline", type=Path)
+    compressed_host_run_parser.add_argument("run_directory", type=Path)
+    compressed_host_run_parser.add_argument("--run-id", required=True)
+    compressed_host_run_parser.add_argument("--git-commit", required=True)
+    compressed_host_run_parser.add_argument("--git-dirty", action="store_true")
+    compressed_host_run_parser.add_argument("--dirty-patch-sha256")
+    compressed_host_run_parser.add_argument(
+        "--machine-baseline-sha256", required=True
+    )
+    compressed_host_run_parser.add_argument(
+        "--benchmark-contract-sha256", required=True
+    )
+    compressed_host_run_parser.add_argument("--model-manifest-sha256", required=True)
+    compressed_host_run_parser.add_argument("--route-trace-sha256", required=True)
+    compressed_host_run_parser.add_argument("--output", default="-")
+
     route_trace_parser = subparsers.add_parser(
         "build-route-trace",
         help="normalize a fixed OLMoE capture into frozen RouteTrace v1",
@@ -473,6 +520,20 @@ def _build_parser() -> argparse.ArgumentParser:
     traffic_parser.add_argument("--zero-point-bytes", type=int, default=0)
     traffic_parser.add_argument("--tensor-alignment", type=int, default=128)
     traffic_parser.add_argument("--output", default="-")
+
+    spark_traffic_parser = subparsers.add_parser(
+        "build-spark-traffic-model",
+        help="build a counter-free modeled/estimated Spark traffic sensitivity report",
+    )
+    spark_traffic_parser.add_argument("source_ledger", type=Path)
+    spark_traffic_parser.add_argument("weight_traffic", type=Path)
+    spark_traffic_parser.add_argument("route_trace", type=Path)
+    spark_traffic_parser.add_argument("bandwidth_soak", type=Path)
+    spark_traffic_parser.add_argument("model_config", type=Path)
+    spark_traffic_parser.add_argument(
+        "--amplification-factor", type=float, action="append", dest="factors"
+    )
+    spark_traffic_parser.add_argument("--output", default="-")
     return parser
 
 
@@ -982,6 +1043,43 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _write_document(document, arguments.output)
             return 0
+        if arguments.command == "normalize-compressed-host-baseline":
+            from .compressed_host_baseline import build_compressed_host_baseline
+
+            document = build_compressed_host_baseline(
+                arguments.run_directory,
+                target_id=arguments.target_id,
+                source_commit=arguments.source_commit,
+                backend=arguments.backend,
+                container_image=arguments.container_image,
+                model_id=arguments.model_id,
+                model_revision=arguments.model_revision,
+                expert_pack_sha256=arguments.expert_pack_sha256,
+                input_tokens=arguments.input_tokens,
+                output_tokens=arguments.output_tokens,
+                warmup_requests=arguments.warmup_requests,
+                measured_requests=arguments.measured_requests,
+                safe_uma_budget_bytes=arguments.safe_uma_budget_bytes,
+            )
+            _write_document(document, arguments.output)
+            return 0
+        if arguments.command == "build-compressed-host-run-manifest":
+            from .compressed_host_baseline import build_compressed_host_run_manifest
+
+            document = build_compressed_host_run_manifest(
+                arguments.baseline,
+                arguments.run_directory,
+                route_trace_sha256=arguments.route_trace_sha256,
+                run_id=arguments.run_id,
+                git_commit=arguments.git_commit,
+                git_dirty=arguments.git_dirty,
+                dirty_patch_sha256=arguments.dirty_patch_sha256,
+                machine_baseline_sha256=arguments.machine_baseline_sha256,
+                benchmark_contract_sha256=arguments.benchmark_contract_sha256,
+                model_manifest_sha256=arguments.model_manifest_sha256,
+            )
+            _write_document(document, arguments.output)
+            return 0
         if arguments.command == "build-route-trace":
             from .route_trace import build_route_trace
 
@@ -1067,6 +1165,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_document(document, arguments.output)
             if output_path is not None:
                 validate_file(output_path)
+            return 0
+        if arguments.command == "build-spark-traffic-model":
+            from .traffic_model import build_spark_traffic_model
+
+            source_ledger = validate_file(arguments.source_ledger, require_frozen=True)
+            weight_traffic = validate_file(arguments.weight_traffic)
+            route_trace = validate_file(arguments.route_trace, require_frozen=True)
+            bandwidth_soak = validate_file(arguments.bandwidth_soak)
+            try:
+                model_config = json.loads(
+                    arguments.model_config.read_text(encoding="utf-8")
+                )
+            except json.JSONDecodeError as exc:
+                raise ContractError(f"cannot parse model config: {exc}") from exc
+            if not isinstance(model_config, dict):
+                raise ContractError("model config must contain an object")
+            document = build_spark_traffic_model(
+                source_ledger,
+                weight_traffic,
+                route_trace,
+                bandwidth_soak,
+                model_config,
+                source_ledger_path=str(arguments.source_ledger),
+                source_ledger_file_sha256=file_sha256(arguments.source_ledger),
+                weight_traffic_path=str(arguments.weight_traffic),
+                weight_traffic_file_sha256=file_sha256(arguments.weight_traffic),
+                route_trace_path=str(arguments.route_trace),
+                route_trace_file_sha256=file_sha256(arguments.route_trace),
+                bandwidth_soak_path=str(arguments.bandwidth_soak),
+                bandwidth_soak_file_sha256=file_sha256(arguments.bandwidth_soak),
+                model_config_path=str(arguments.model_config),
+                model_config_file_sha256=file_sha256(arguments.model_config),
+                amplification_factors=arguments.factors
+                or [1.0, 1.25, 1.5, 2.0, 3.0, 4.0],
+            )
+            _write_document(document, arguments.output)
             return 0
     except (ContractError, OSError, ValueError) as exc:
         print(f"umaq: error: {exc}", file=sys.stderr)
