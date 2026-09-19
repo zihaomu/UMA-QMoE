@@ -10,6 +10,7 @@ import pytest
 from uma_qmoe.contracts import ContractError, validate_document
 from uma_qmoe.target_pack import (
     TargetPackReader,
+    TargetTensor,
     decode_target_tensor,
     inspect_target_pack,
     write_target_pack,
@@ -132,5 +133,57 @@ def test_target_pack_requires_complete_layer_policy(tmp_path: Path) -> None:
             model_manifest_sha256="b" * 64,
             policy_id=POLICY_ID,
             layer_encodings=policy,
+            policy_evidence_sha256="c" * 64,
+        )
+
+
+def test_target_pack_preserves_validated_preencoded_tensor(tmp_path: Path) -> None:
+    path = tmp_path / "preencoded.uqtp"
+    name = "model.layers.8.mlp.experts.0.gate_proj.weight"
+    tensor = TargetTensor(
+        shape=(1, 2),
+        encoding="q8_group128",
+        data=bytes((1, 255)),
+        scales=np.asarray([0.25], dtype="<f4").tobytes(),
+        group_size=128,
+    )
+    write_target_pack(
+        path,
+        [(name, tensor)],
+        model_id="allenai/OLMoE-1B-7B-0125",
+        model_revision="a" * 40,
+        model_manifest_sha256="b" * 64,
+        policy_id=POLICY_ID,
+        layer_encodings=LAYER_ENCODINGS,
+        policy_evidence_sha256="c" * 64,
+    )
+    with TargetPackReader(path) as reader:
+        observed = reader.tensor(name)
+        assert observed == tensor
+        assert np.array_equal(
+            decode_target_tensor(observed),
+            np.asarray([[0.25, -0.25]], dtype=np.float32),
+        )
+
+
+def test_target_pack_rejects_preencoded_tensor_outside_layer_policy(
+    tmp_path: Path,
+) -> None:
+    tensor = TargetTensor(
+        shape=(1, 2),
+        encoding="q8_group128",
+        data=bytes((1, 255)),
+        scales=np.asarray([0.25], dtype="<f4").tobytes(),
+        group_size=128,
+    )
+    with pytest.raises(ContractError, match="does not match its layer policy"):
+        write_target_pack(
+            tmp_path / "mismatch.uqtp",
+            [("model.layers.0.mlp.experts.0.gate_proj.weight", tensor)],
+            model_id="allenai/OLMoE-1B-7B-0125",
+            model_revision="a" * 40,
+            model_manifest_sha256="b" * 64,
+            policy_id=POLICY_ID,
+            layer_encodings=LAYER_ENCODINGS,
             policy_evidence_sha256="c" * 64,
         )
