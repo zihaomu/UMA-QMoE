@@ -260,6 +260,13 @@ def main() -> int:
             == args.measured_iterations,
         }
         gates["overall_passed"] = all(gates.values())
+        abi = (
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-"
+            "route-pruned-tiled-v5"
+        )
+        execution_strategy = (
+            "decode-two-launch-prefill-expert-tiled-pruned-three-stage"
+        )
         document = {
             "schema_version": 1,
             "kind": "packed_q4_kernel_evidence",
@@ -277,8 +284,8 @@ def main() -> int:
                 "platform": backend.platform,
                 "device_name": torch.cuda.get_device_name(0),
                 "source_sha256": native_kernel_source_sha256(),
-                "abi": "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-tiled-v4",
-                "execution_strategy": "decode-two-launch-prefill-expert-tiled-three-stage",
+                "abi": abi,
+                "execution_strategy": execution_strategy,
                 "compiled_for_target": True,
                 "reads_packed_weights_directly": True,
                 "full_dequantized_weight_cache": False,
