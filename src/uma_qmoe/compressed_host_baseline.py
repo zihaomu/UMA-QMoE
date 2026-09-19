@@ -1,4 +1,4 @@
-"""Normalize the packed native OLMoE host into CompressedHostBaseline v1."""
+"""Normalize the packed native OLMoE host into CompressedHostBaseline v1/v2."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ def build_compressed_host_baseline(
     model_id: str,
     model_revision: str,
     expert_pack_sha256: str,
+    target_policy_id: str | None = None,
     input_tokens: int,
     output_tokens: int,
     warmup_requests: int,
@@ -77,6 +78,8 @@ def build_compressed_host_baseline(
         }.items()
     ):
         raise ContractError("compressed runner model identity does not match normalization")
+    if runner_model.get("target_policy_id") != target_policy_id:
+        raise ContractError("compressed runner TargetPack policy does not match normalization")
     expected_workload = {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
@@ -128,8 +131,23 @@ def build_compressed_host_baseline(
         "within_safe_uma_budget": memory["peak_bytes"] <= safe_uma_budget_bytes,
     }
     gates["overall_passed"] = all(gates.values())
+    model = {
+        "model_id": model_id,
+        "revision": identity(model_revision, "model_revision", 40),
+        "dense_weight_dtype": "BF16",
+        "expert_quantization": (
+            "mixed_target_pack_q4_q8_bf16"
+            if target_policy_id
+            else "canonical_q4_group128"
+        ),
+        "expert_pack_sha256": identity(
+            expert_pack_sha256, "expert_pack_sha256", 64
+        ),
+    }
+    if target_policy_id:
+        model["target_policy_id"] = target_policy_id
     document = {
-        "schema_version": 1,
+        "schema_version": 2 if target_policy_id else 1,
         "kind": "compressed_host_baseline",
         "generated_at": _utc_now(),
         "target_id": target_id,
@@ -148,15 +166,7 @@ def build_compressed_host_baseline(
             ),
             "fallback_count": runtime["fallback_count"],
         },
-        "model": {
-            "model_id": model_id,
-            "revision": identity(model_revision, "model_revision", 40),
-            "dense_weight_dtype": "BF16",
-            "expert_quantization": "canonical_q4_group128",
-            "expert_pack_sha256": identity(
-                expert_pack_sha256, "expert_pack_sha256", 64
-            ),
-        },
+        "model": model,
         "workload": {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,

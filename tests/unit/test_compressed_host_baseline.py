@@ -12,7 +12,7 @@ from uma_qmoe.compressed_host_baseline import (
 from uma_qmoe.contracts import ContractError, validate_document
 
 
-def _write_run(directory: Path) -> None:
+def _write_run(directory: Path, *, target_policy_id: str | None = None) -> None:
     directory.mkdir()
     result = {
         "duration_seconds": 2.0,
@@ -74,6 +74,7 @@ def _write_run(directory: Path) -> None:
             "model_id": "allenai/OLMoE-1B-7B-0125",
             "model_revision": "9b0c1aa87e34a20052389dce1f0cf01da783f654",
             "expert_pack_sha256": "d" * 64,
+            "target_policy_id": target_policy_id,
         },
         "workload": {
             "input_tokens": 4,
@@ -107,7 +108,7 @@ def _write_run(directory: Path) -> None:
     )
 
 
-def _build(directory: Path) -> dict:
+def _build(directory: Path, *, target_policy_id: str | None = None) -> dict:
     return build_compressed_host_baseline(
         directory,
         target_id="halo3",
@@ -117,6 +118,7 @@ def _build(directory: Path) -> dict:
         model_id="allenai/OLMoE-1B-7B-0125",
         model_revision="9b0c1aa87e34a20052389dce1f0cf01da783f654",
         expert_pack_sha256="d" * 64,
+        target_policy_id=target_policy_id,
         input_tokens=4,
         output_tokens=3,
         warmup_requests=1,
@@ -135,6 +137,25 @@ def test_compressed_host_baseline_binds_native_performance_mode(
     assert document["gates"]["cache_stable_after_warmup"] is True
     assert document["gates"]["no_dequantized_weight_cache"] is True
     validate_document(document)
+
+
+def test_compressed_host_v2_binds_mixed_target_policy(tmp_path: Path) -> None:
+    run = tmp_path / "run"
+    policy_id = "olmoe-layer15-awq-q4-q8-bf16-v2"
+    _write_run(run, target_policy_id=policy_id)
+    document = _build(run, target_policy_id=policy_id)
+    assert document["schema_version"] == 2
+    assert document["model"]["expert_quantization"] == (
+        "mixed_target_pack_q4_q8_bf16"
+    )
+    assert document["model"]["target_policy_id"] == policy_id
+    validate_document(document)
+
+    document["model"]["target_policy_id"] = (
+        "olmoe-layer15-awq-q4-q8-bf16-v1"
+    )
+    with pytest.raises(ContractError):
+        validate_document(document)
 
 
 def test_compressed_host_baseline_rejects_cache_growth(tmp_path: Path) -> None:

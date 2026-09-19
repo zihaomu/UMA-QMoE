@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://uma-qmoe.local/schemas/compressed_host_baseline.schema.json",
-  "title": "UMA-QMoE CompressedHostBaseline v1",
+  "title": "UMA-QMoE CompressedHostBaseline v1/v2",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "kind", "generated_at", "target_id", "status", "implementation", "model", "workload", "results", "loader", "backend_cache", "memory", "resource_policy", "telemetry", "raw_artifacts", "gates"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "kind": { "const": "compressed_host_baseline" },
     "generated_at": { "type": "string", "format": "date-time" },
     "target_id": { "enum": ["halo3", "spark1"] },
@@ -34,8 +34,9 @@
         "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
         "revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" },
         "dense_weight_dtype": { "const": "BF16" },
-        "expert_quantization": { "const": "canonical_q4_group128" },
-        "expert_pack_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "expert_quantization": { "enum": ["canonical_q4_group128", "mixed_target_pack_q4_q8_bf16"] },
+        "expert_pack_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "target_policy_id": { "const": "olmoe-layer15-awq-q4-q8-bf16-v2" }
       }
     },
     "workload": { "$ref": "#/$defs/workload" },
@@ -100,6 +101,31 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "schema_version": { "const": 1 } } },
+      "then": {
+        "properties": {
+          "model": {
+            "properties": {
+              "expert_quantization": { "const": "canonical_q4_group128" }
+            },
+            "not": { "required": ["target_policy_id"] }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "model": {
+            "required": ["target_policy_id"],
+            "properties": {
+              "expert_quantization": { "const": "mixed_target_pack_q4_q8_bf16" }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "workload": {
       "type": "object", "additionalProperties": false,
