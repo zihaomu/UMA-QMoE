@@ -318,9 +318,6 @@ __global__ void packed_q4_gate_up_tiled_kernel(
   __shared__ float input_tile[kRouteTile][kReductionTile];
   __shared__ float gate_tile[kOutputTile][kReductionTile];
   __shared__ float up_tile[kOutputTile][kReductionTile];
-  __shared__ std::int64_t routes[kRouteTile];
-  if (thread < kRouteTile) routes[thread] = route;
-  __syncthreads();
 
   float gate_accumulator = 0.0f;
   float up_accumulator = 0.0f;
@@ -330,7 +327,10 @@ __global__ void packed_q4_gate_up_tiled_kernel(
          load += kRouteTile * kOutputTile) {
       const int row = load / kReductionTile;
       const int column = load % kReductionTile;
-      const std::int64_t input_route = routes[row];
+      const std::int64_t input_rank =
+          expert_offsets[expert] + blockIdx.z * kRouteTile + row;
+      const std::int64_t input_route =
+          input_rank < expert_offsets[expert + 1] ? route_order[input_rank] : -1;
       input_tile[row][column] =
           input_route >= 0
           ? static_cast<float>(
@@ -413,9 +413,6 @@ __global__ void packed_q4_down_tiled_kernel(
   const std::int64_t scale_stride = kMatrixElements / group_size;
   __shared__ float input_tile[kRouteTile][kReductionTile];
   __shared__ float weight_tile[kOutputTile][kReductionTile];
-  __shared__ std::int64_t routes[kRouteTile];
-  if (thread < kRouteTile) routes[thread] = route;
-  __syncthreads();
 
   float accumulator = 0.0f;
   for (int reduction_base = 0; reduction_base < kIntermediateSize;
@@ -424,7 +421,10 @@ __global__ void packed_q4_down_tiled_kernel(
          load += kRouteTile * kOutputTile) {
       const int row = load / kReductionTile;
       const int column = load % kReductionTile;
-      const std::int64_t input_route = routes[row];
+      const std::int64_t input_rank =
+          expert_offsets[expert] + blockIdx.z * kRouteTile + row;
+      const std::int64_t input_route =
+          input_rank < expert_offsets[expert + 1] ? route_order[input_rank] : -1;
       input_tile[row][column] =
           input_route >= 0
           ? static_cast<float>(
