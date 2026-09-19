@@ -695,6 +695,317 @@ __global__ void packed_q4_down_vectorized_kernel(
   }
 }
 
+// Direct symmetric Q8 kernels share the route schedule with packed Q4 but
+// consume one signed byte per weight.  Q8 bytes remain compressed throughout
+// execution; no BF16/F32 expert matrix is materialized or cached.
+__global__ void packed_q8_gate_up_swiglu_kernel(
+    const c10::BFloat16* __restrict__ hidden,
+    const std::int64_t* __restrict__ expert_indices,
+    const std::int8_t* __restrict__ gate_quantized,
+    const float* __restrict__ gate_scales,
+    const std::int8_t* __restrict__ up_quantized,
+    const float* __restrict__ up_scales,
+    c10::BFloat16* __restrict__ intermediate,
+    std::int64_t rows,
+    std::int64_t group_size) {
+  const std::int64_t feature = blockIdx.x;
+  const std::int64_t route = blockIdx.y;
+  const std::int64_t route_count = rows * kTopK;
+  if (route >= route_count || feature >= kIntermediateSize) return;
+
+  const std::int64_t token = route / kTopK;
+  const std::int64_t expert = expert_indices[route];
+  if (expert < 0 || expert >= kExpertCount) return;
+  constexpr std::int64_t kMatrixElements =
+      static_cast<std::int64_t>(kIntermediateSize) * kHiddenSize;
+  const std::int64_t scale_stride = kMatrixElements / group_size;
+  const std::int64_t weight_row = feature * kHiddenSize;
+  const std::int64_t data_base = expert * kMatrixElements + weight_row;
+  const std::int64_t scale_base =
+      expert * scale_stride + weight_row / group_size;
+  const std::int64_t input_base = token * kHiddenSize;
+
+  float gate_partial = 0.0f;
+  float up_partial = 0.0f;
+  for (std::int64_t column = threadIdx.x; column < kHiddenSize;
+       column += blockDim.x) {
+    const float input = static_cast<float>(hidden[input_base + column]);
+    const std::int64_t scale_index = scale_base + column / group_size;
+    gate_partial += input * static_cast<float>(gate_quantized[data_base + column]) *
+                    gate_scales[scale_index];
+    up_partial += input * static_cast<float>(up_quantized[data_base + column]) *
+                  up_scales[scale_index];
+  }
+  __shared__ float gate_reduction[kThreads];
+  __shared__ float up_reduction[kThreads];
+  gate_reduction[threadIdx.x] = gate_partial;
+  up_reduction[threadIdx.x] = up_partial;
+  __syncthreads();
+  for (int stride = kThreads / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      gate_reduction[threadIdx.x] += gate_reduction[threadIdx.x + stride];
+      up_reduction[threadIdx.x] += up_reduction[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    const c10::BFloat16 gate_bf16 =
+        static_cast<c10::BFloat16>(gate_reduction[0]);
+    const c10::BFloat16 up_bf16 =
+        static_cast<c10::BFloat16>(up_reduction[0]);
+    const float gate = static_cast<float>(gate_bf16);
+    intermediate[route * kIntermediateSize + feature] =
+        static_cast<c10::BFloat16>(
+            gate / (1.0f + expf(-gate)) * static_cast<float>(up_bf16));
+  }
+}
+
+__global__ void packed_q8_down_route_kernel(
+    const c10::BFloat16* __restrict__ intermediate,
+    const std::int64_t* __restrict__ expert_indices,
+    const c10::BFloat16* __restrict__ routing_weights,
+    const std::int8_t* __restrict__ down_quantized,
+    const float* __restrict__ down_scales,
+    c10::BFloat16* __restrict__ output,
+    std::int64_t rows,
+    std::int64_t group_size) {
+  const std::int64_t output_feature = blockIdx.x;
+  const std::int64_t token = blockIdx.y;
+  if (token >= rows || output_feature >= kHiddenSize) return;
+
+  constexpr std::int64_t kMatrixElements =
+      static_cast<std::int64_t>(kHiddenSize) * kIntermediateSize;
+  const std::int64_t scale_stride = kMatrixElements / group_size;
+  const std::int64_t weight_row = output_feature * kIntermediateSize;
+  float partial = 0.0f;
+  for (int slot = 0; slot < kTopK; ++slot) {
+    const std::int64_t route = token * kTopK + slot;
+    const std::int64_t expert = expert_indices[route];
+    if (expert < 0 || expert >= kExpertCount) continue;
+    const std::int64_t data_base = expert * kMatrixElements + weight_row;
+    const std::int64_t scale_base =
+        expert * scale_stride + weight_row / group_size;
+    const std::int64_t input_base = route * kIntermediateSize;
+    float expert_partial = 0.0f;
+    for (std::int64_t column = threadIdx.x; column < kIntermediateSize;
+         column += blockDim.x) {
+      expert_partial +=
+          static_cast<float>(intermediate[input_base + column]) *
+          static_cast<float>(down_quantized[data_base + column]) *
+          down_scales[scale_base + column / group_size];
+    }
+    partial += static_cast<float>(routing_weights[route]) * expert_partial;
+  }
+  __shared__ float reduction[kThreads];
+  reduction[threadIdx.x] = partial;
+  __syncthreads();
+  for (int stride = kThreads / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      reduction[threadIdx.x] += reduction[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    output[token * kHiddenSize + output_feature] =
+        static_cast<c10::BFloat16>(reduction[0]);
+  }
+}
+
+__global__ void packed_q8_gate_up_vectorized_kernel(
+    const c10::BFloat16* __restrict__ hidden,
+    const std::int64_t* __restrict__ route_order,
+    const std::int64_t* __restrict__ expert_offsets,
+    const std::int8_t* __restrict__ gate_quantized,
+    const float* __restrict__ gate_scales,
+    const std::int8_t* __restrict__ up_quantized,
+    const float* __restrict__ up_scales,
+    c10::BFloat16* __restrict__ intermediate,
+    std::int64_t group_size) {
+  const int local_output = threadIdx.x;
+  const int local_route = threadIdx.y;
+  const int thread = local_route * kOutputTile + local_output;
+  const std::int64_t expert = blockIdx.y;
+  const std::int64_t route_base =
+      expert_offsets[expert] + blockIdx.z * kRouteTile;
+  if (route_base >= expert_offsets[expert + 1]) return;
+  const std::int64_t route_rank = route_base + local_route;
+  const std::int64_t route =
+      route_rank < expert_offsets[expert + 1] ? route_order[route_rank] : -1;
+  const std::int64_t output_base =
+      static_cast<std::int64_t>(blockIdx.x) * kVectorOutputTile;
+
+  constexpr std::int64_t kMatrixElements =
+      static_cast<std::int64_t>(kIntermediateSize) * kHiddenSize;
+  const std::int64_t scale_stride = kMatrixElements / group_size;
+  __shared__ float input_tile[kRouteTile][kReductionTile];
+  __shared__ float gate_tile[kVectorOutputTile][kReductionTile];
+  __shared__ float up_tile[kVectorOutputTile][kReductionTile];
+  float gate_accumulators[kOutputsPerThread] = {};
+  float up_accumulators[kOutputsPerThread] = {};
+
+  for (int reduction_base = 0; reduction_base < kHiddenSize;
+       reduction_base += kReductionTile) {
+    for (int load = thread; load < kRouteTile * kReductionTile;
+         load += kRouteTile * kOutputTile) {
+      const int row = load / kReductionTile;
+      const int column = load % kReductionTile;
+      const std::int64_t input_rank = route_base + row;
+      const std::int64_t input_route =
+          input_rank < expert_offsets[expert + 1] ? route_order[input_rank] : -1;
+      input_tile[row][column] =
+          input_route >= 0
+              ? static_cast<float>(hidden[
+                    (input_route / kTopK) * kHiddenSize + reduction_base + column])
+              : 0.0f;
+    }
+    for (int load = thread; load < kVectorOutputTile * kReductionTile;
+         load += kRouteTile * kOutputTile) {
+      const int output = load / kReductionTile;
+      const int column = load % kReductionTile;
+      const std::int64_t output_feature = output_base + output;
+      if (output_feature < kIntermediateSize) {
+        const std::int64_t weight_index =
+            output_feature * kHiddenSize + reduction_base + column;
+        const std::int64_t data_index = expert * kMatrixElements + weight_index;
+        const std::int64_t scale_index =
+            expert * scale_stride + weight_index / group_size;
+        gate_tile[output][column] =
+            static_cast<float>(gate_quantized[data_index]) *
+            gate_scales[scale_index];
+        up_tile[output][column] =
+            static_cast<float>(up_quantized[data_index]) * up_scales[scale_index];
+      } else {
+        gate_tile[output][column] = 0.0f;
+        up_tile[output][column] = 0.0f;
+      }
+    }
+    __syncthreads();
+    if (route >= 0) {
+#pragma unroll
+      for (int output_slot = 0; output_slot < kOutputsPerThread; ++output_slot) {
+        const int output = local_output + output_slot * kOutputTile;
+#pragma unroll
+        for (int reduction = 0; reduction < kReductionTile; ++reduction) {
+          const float input = input_tile[local_route][reduction];
+          gate_accumulators[output_slot] += input * gate_tile[output][reduction];
+          up_accumulators[output_slot] += input * up_tile[output][reduction];
+        }
+      }
+    }
+    __syncthreads();
+  }
+  if (route >= 0) {
+#pragma unroll
+    for (int output_slot = 0; output_slot < kOutputsPerThread; ++output_slot) {
+      const std::int64_t output_feature =
+          output_base + local_output + output_slot * kOutputTile;
+      if (output_feature < kIntermediateSize) {
+        const c10::BFloat16 gate_bf16 =
+            static_cast<c10::BFloat16>(gate_accumulators[output_slot]);
+        const c10::BFloat16 up_bf16 =
+            static_cast<c10::BFloat16>(up_accumulators[output_slot]);
+        const float gate = static_cast<float>(gate_bf16);
+        intermediate[route * kIntermediateSize + output_feature] =
+            static_cast<c10::BFloat16>(
+                gate / (1.0f + expf(-gate)) * static_cast<float>(up_bf16));
+      }
+    }
+  }
+}
+
+__global__ void packed_q8_down_vectorized_kernel(
+    const c10::BFloat16* __restrict__ intermediate,
+    const c10::BFloat16* __restrict__ routing_weights,
+    const std::int64_t* __restrict__ route_order,
+    const std::int64_t* __restrict__ expert_offsets,
+    const std::int8_t* __restrict__ down_quantized,
+    const float* __restrict__ down_scales,
+    c10::BFloat16* __restrict__ route_output,
+    std::int64_t group_size) {
+  const int local_output = threadIdx.x;
+  const int local_route = threadIdx.y;
+  const int thread = local_route * kOutputTile + local_output;
+  const std::int64_t expert = blockIdx.y;
+  const std::int64_t route_base =
+      expert_offsets[expert] + blockIdx.z * kRouteTile;
+  if (route_base >= expert_offsets[expert + 1]) return;
+  const std::int64_t route_rank = route_base + local_route;
+  const std::int64_t route =
+      route_rank < expert_offsets[expert + 1] ? route_order[route_rank] : -1;
+  const std::int64_t output_base =
+      static_cast<std::int64_t>(blockIdx.x) * kVectorOutputTile;
+
+  constexpr std::int64_t kMatrixElements =
+      static_cast<std::int64_t>(kHiddenSize) * kIntermediateSize;
+  const std::int64_t scale_stride = kMatrixElements / group_size;
+  __shared__ float input_tile[kRouteTile][kReductionTile];
+  __shared__ float weight_tile[kVectorOutputTile][kReductionTile];
+  float accumulators[kOutputsPerThread] = {};
+
+  for (int reduction_base = 0; reduction_base < kIntermediateSize;
+       reduction_base += kReductionTile) {
+    for (int load = thread; load < kRouteTile * kReductionTile;
+         load += kRouteTile * kOutputTile) {
+      const int row = load / kReductionTile;
+      const int column = load % kReductionTile;
+      const std::int64_t input_rank = route_base + row;
+      const std::int64_t input_route =
+          input_rank < expert_offsets[expert + 1] ? route_order[input_rank] : -1;
+      input_tile[row][column] =
+          input_route >= 0
+              ? static_cast<float>(intermediate[
+                    input_route * kIntermediateSize + reduction_base + column])
+              : 0.0f;
+    }
+    for (int load = thread; load < kVectorOutputTile * kReductionTile;
+         load += kRouteTile * kOutputTile) {
+      const int output = load / kReductionTile;
+      const int column = load % kReductionTile;
+      const std::int64_t output_feature = output_base + output;
+      if (output_feature < kHiddenSize) {
+        const std::int64_t weight_index =
+            output_feature * kIntermediateSize + reduction_base + column;
+        const std::int64_t data_index = expert * kMatrixElements + weight_index;
+        const std::int64_t scale_index =
+            expert * scale_stride + weight_index / group_size;
+        weight_tile[output][column] =
+            static_cast<float>(down_quantized[data_index]) *
+            down_scales[scale_index];
+      } else {
+        weight_tile[output][column] = 0.0f;
+      }
+    }
+    __syncthreads();
+    if (route >= 0) {
+#pragma unroll
+      for (int output_slot = 0; output_slot < kOutputsPerThread; ++output_slot) {
+        const int output = local_output + output_slot * kOutputTile;
+#pragma unroll
+        for (int reduction = 0; reduction < kReductionTile; ++reduction) {
+          accumulators[output_slot] +=
+              input_tile[local_route][reduction] * weight_tile[output][reduction];
+        }
+      }
+    }
+    __syncthreads();
+  }
+  if (route >= 0) {
+#pragma unroll
+    for (int output_slot = 0; output_slot < kOutputsPerThread; ++output_slot) {
+      const std::int64_t output_feature =
+          output_base + local_output + output_slot * kOutputTile;
+      if (output_feature < kHiddenSize) {
+        const c10::BFloat16 expert_value =
+            static_cast<c10::BFloat16>(accumulators[output_slot]);
+        route_output[route * kHiddenSize + output_feature] =
+            static_cast<c10::BFloat16>(
+                static_cast<float>(expert_value) *
+                static_cast<float>(routing_weights[route]));
+      }
+    }
+  }
+}
+
 #if defined(__HIP_PLATFORM_AMD__) && defined(UMA_QMOE_USE_WMMA)
 
 // gfx11 wave32 path. Each wave computes a 16-route x 16-output tile with
@@ -1193,6 +1504,127 @@ torch::Tensor uma_qmoe_q4_moe_prefill_cuda(
       route_output.data_ptr<c10::BFloat16>(),
       group_size);
 #endif
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  const dim3 reduce_grid(
+      (kHiddenSize + kThreads - 1) / kThreads,
+      static_cast<unsigned int>(rows),
+      1);
+  reduce_topk_route_output_kernel<<<reduce_grid, kThreads, 0, stream.stream()>>>(
+      route_output.data_ptr<c10::BFloat16>(),
+      output.data_ptr<c10::BFloat16>(),
+      rows);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return output;
+}
+
+torch::Tensor uma_qmoe_q8_moe_forward_cuda(
+    const torch::Tensor& hidden,
+    const torch::Tensor& expert_indices,
+    const torch::Tensor& routing_weights,
+    const torch::Tensor& gate_quantized,
+    const torch::Tensor& gate_scales,
+    const torch::Tensor& up_quantized,
+    const torch::Tensor& up_scales,
+    const torch::Tensor& down_quantized,
+    const torch::Tensor& down_scales,
+    std::int64_t group_size) {
+  const c10::cuda::CUDAGuard device_guard(hidden.device());
+  const auto stream = at::cuda::getCurrentCUDAStream(hidden.get_device());
+  const std::int64_t rows = hidden.size(0);
+  auto intermediate = torch::empty(
+      {rows * kTopK, kIntermediateSize},
+      hidden.options().dtype(torch::kBFloat16));
+  auto output =
+      torch::empty({rows, kHiddenSize}, hidden.options().dtype(torch::kBFloat16));
+
+  const dim3 gate_up_grid(
+      kIntermediateSize, static_cast<unsigned int>(rows * kTopK), 1);
+  packed_q8_gate_up_swiglu_kernel<<<gate_up_grid, kThreads, 0, stream.stream()>>>(
+      hidden.data_ptr<c10::BFloat16>(),
+      expert_indices.data_ptr<std::int64_t>(),
+      gate_quantized.data_ptr<std::int8_t>(),
+      gate_scales.data_ptr<float>(),
+      up_quantized.data_ptr<std::int8_t>(),
+      up_scales.data_ptr<float>(),
+      intermediate.data_ptr<c10::BFloat16>(),
+      rows,
+      group_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  const dim3 down_grid(kHiddenSize, static_cast<unsigned int>(rows), 1);
+  packed_q8_down_route_kernel<<<down_grid, kThreads, 0, stream.stream()>>>(
+      intermediate.data_ptr<c10::BFloat16>(),
+      expert_indices.data_ptr<std::int64_t>(),
+      routing_weights.data_ptr<c10::BFloat16>(),
+      down_quantized.data_ptr<std::int8_t>(),
+      down_scales.data_ptr<float>(),
+      output.data_ptr<c10::BFloat16>(),
+      rows,
+      group_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return output;
+}
+
+torch::Tensor uma_qmoe_q8_moe_prefill_cuda(
+    const torch::Tensor& hidden,
+    const torch::Tensor& expert_indices,
+    const torch::Tensor& routing_weights,
+    const torch::Tensor& route_order,
+    const torch::Tensor& expert_offsets,
+    const torch::Tensor& gate_quantized,
+    const torch::Tensor& gate_scales,
+    const torch::Tensor& up_quantized,
+    const torch::Tensor& up_scales,
+    const torch::Tensor& down_quantized,
+    const torch::Tensor& down_scales,
+    std::int64_t group_size) {
+  const c10::cuda::CUDAGuard device_guard(hidden.device());
+  const auto stream = at::cuda::getCurrentCUDAStream(hidden.get_device());
+  const std::int64_t rows = hidden.size(0);
+  const std::int64_t route_count = rows * kTopK;
+  auto intermediate = torch::empty(
+      {route_count, kIntermediateSize},
+      hidden.options().dtype(torch::kBFloat16));
+  auto route_output = torch::empty(
+      {route_count, kHiddenSize}, hidden.options().dtype(torch::kBFloat16));
+  auto output =
+      torch::empty({rows, kHiddenSize}, hidden.options().dtype(torch::kBFloat16));
+
+  const unsigned int route_tiles =
+      static_cast<unsigned int>((rows + kRouteTile - 1) / kRouteTile);
+  const dim3 tiled_block(kOutputTile, kRouteTile, 1);
+  const dim3 gate_up_grid(
+      (kIntermediateSize + kVectorOutputTile - 1) / kVectorOutputTile,
+      kExpertCount,
+      route_tiles);
+  packed_q8_gate_up_vectorized_kernel<<<
+      gate_up_grid, tiled_block, 0, stream.stream()>>>(
+      hidden.data_ptr<c10::BFloat16>(),
+      route_order.data_ptr<std::int64_t>(),
+      expert_offsets.data_ptr<std::int64_t>(),
+      gate_quantized.data_ptr<std::int8_t>(),
+      gate_scales.data_ptr<float>(),
+      up_quantized.data_ptr<std::int8_t>(),
+      up_scales.data_ptr<float>(),
+      intermediate.data_ptr<c10::BFloat16>(),
+      group_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  const dim3 down_grid(
+      (kHiddenSize + kVectorOutputTile - 1) / kVectorOutputTile,
+      kExpertCount,
+      route_tiles);
+  packed_q8_down_vectorized_kernel<<<
+      down_grid, tiled_block, 0, stream.stream()>>>(
+      intermediate.data_ptr<c10::BFloat16>(),
+      routing_weights.data_ptr<c10::BFloat16>(),
+      route_order.data_ptr<std::int64_t>(),
+      expert_offsets.data_ptr<std::int64_t>(),
+      down_quantized.data_ptr<std::int8_t>(),
+      down_scales.data_ptr<float>(),
+      route_output.data_ptr<c10::BFloat16>(),
+      group_size);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   const dim3 reduce_grid(

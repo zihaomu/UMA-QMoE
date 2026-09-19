@@ -7,6 +7,7 @@ import pytest
 
 from uma_qmoe.contracts import ContractError, validate_document
 from uma_qmoe.native_backend import (
+    MixedTargetNativeBackend,
     PackedQ4NativeBackend,
     _stage_native_sources,
     native_kernel_source_sha256,
@@ -208,6 +209,40 @@ def test_native_backend_releases_closed_pack_cache() -> None:
     backend.release_pack(1)
     assert set(backend._cache) == {(2, "second", "cuda:0")}
     assert set(backend._layer_cache) == {(2, 0, "cuda:0")}
+
+
+def test_mixed_backend_requires_direct_q8_entrypoints() -> None:
+    with pytest.raises(ContractError, match="q8_moe_forward"):
+        MixedTargetNativeBackend(
+            "cuda_sm121",
+            SimpleNamespace(
+                q4_linear=lambda *_args: None,
+                q4_moe_forward=lambda *_args: None,
+                q4_moe_prefill=lambda *_args: None,
+            ),
+        )
+
+
+def test_mixed_backend_releases_every_encoding_cache() -> None:
+    backend = MixedTargetNativeBackend(
+        "cuda_sm121",
+        SimpleNamespace(
+            q4_linear=lambda *_args: None,
+            q4_moe_forward=lambda *_args: None,
+            q4_moe_prefill=lambda *_args: None,
+            q8_moe_forward=lambda *_args: None,
+            q8_moe_prefill=lambda *_args: None,
+        ),
+    )
+    backend._q4._layer_cache[(1, 15, "cuda:0")] = object()
+    backend._q8_layers[(1, 11, "cuda:0")] = object()
+    backend._q8_layers[(2, 11, "cuda:0")] = object()
+    backend._bf16_layers[(1, 0, "cuda:0")] = object()
+    backend._bf16_layers[(2, 0, "cuda:0")] = object()
+    backend.release_pack(1)
+    assert backend._q4._layer_cache == {}
+    assert set(backend._q8_layers) == {(2, 11, "cuda:0")}
+    assert set(backend._bf16_layers) == {(2, 0, "cuda:0")}
 
 
 def test_packed_q4_evidence_recomputes_gates_and_timing() -> None:
