@@ -46,6 +46,7 @@ SCHEMA_BY_KIND = {
     "run_manifest": "run_manifest.schema.json",
     "route_trace": "route_trace.schema.json",
     "route_trace_replay": "route_trace_replay.schema.json",
+    "route_coverage_policy_search": "route_coverage_policy_search.schema.json",
     "safe_uma_budget": "safe_uma_budget.schema.json",
     "target_inventory": "target_inventory.schema.json",
     "tensor_inventory": "tensor_inventory.schema.json",
@@ -146,6 +147,49 @@ def _validate_refinement_delta(
         for name, value in expected.items()
     ):
         raise ContractError("Mixed-precision refinement delta is inconsistent")
+
+
+def _validate_quality_metrics(
+    metrics: Mapping[str, Any], reference: Mapping[str, Any], label: str
+) -> None:
+    expected_ppl = math.exp(metrics["nll"])
+    if not math.isclose(
+        metrics["perplexity"], expected_ppl, rel_tol=1e-9, abs_tol=1e-12
+    ):
+        raise ContractError(f"{label} perplexity is inconsistent")
+    expected_nll_change = (metrics["nll"] / reference["nll"]) - 1.0
+    expected_ppl_change = (metrics["perplexity"] / reference["perplexity"]) - 1.0
+    if not math.isclose(
+        metrics["relative_nll_change"],
+        expected_nll_change,
+        rel_tol=1e-9,
+        abs_tol=1e-12,
+    ) or not math.isclose(
+        metrics["relative_perplexity_change"],
+        expected_ppl_change,
+        rel_tol=1e-9,
+        abs_tol=1e-12,
+    ):
+        raise ContractError(f"{label} relative quality is inconsistent")
+
+
+def _experts_for_route_coverage(
+    counts: list[int], threshold: float
+) -> tuple[list[int], float]:
+    total = sum(counts)
+    if total <= 0:
+        raise ContractError("Route coverage calibration layer has no assignments")
+    ranking = sorted(range(len(counts)), key=lambda expert: (-counts[expert], expert))
+    selected: list[int] = []
+    covered = 0
+    for expert in ranking:
+        if counts[expert] == 0:
+            break
+        selected.append(expert)
+        covered += counts[expert]
+        if covered / total >= threshold:
+            break
+    return selected, covered / total
 
 
 def validate_document(
@@ -596,6 +640,128 @@ def validate_document(
             raise ContractError("Mixed-precision policy overall gate is inconsistent")
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Mixed-precision policy status is inconsistent")
+    elif kind == "route_coverage_policy_search":
+        dataset = document["dataset"]
+        reference = document["reference"]
+        baseline = document["all_q4_baseline"]
+        storage = document["storage"]
+        thresholds = document["method"]["coverage_thresholds"]
+        calibration = document["calibration"]["route_counts_by_layer"]
+        rows = document["candidate_rows"]
+        calibration_ids = dataset["calibration_sample_ids"]
+        evaluation_ids = dataset["evaluation_sample_ids"]
+        if set(calibration_ids) & set(evaluation_ids):
+            raise ContractError("Route coverage dataset splits must be disjoint")
+        if not math.isclose(
+            reference["perplexity"],
+            math.exp(reference["nll"]),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ContractError("Route coverage reference perplexity is inconsistent")
+        expected_layers = list(range(16))
+        if [row["layer_index"] for row in calibration] != expected_layers:
+            raise ContractError("Route coverage calibration layers are inconsistent")
+        for row in calibration:
+            if sum(row["expert_counts"]) != row["total_assignments"]:
+                raise ContractError("Route coverage assignment count is inconsistent")
+        if len(rows) != len(thresholds) + 1:
+            raise ContractError("Route coverage candidate count is inconsistent")
+        for metrics in [baseline, *(row["metrics"] for row in rows)]:
+            _validate_quality_metrics(metrics, reference, "Route coverage policy")
+        previous_sets = [set() for _ in range(16)]
+        for index, row in enumerate(rows):
+            all_experts = index == len(thresholds)
+            expected_mode = "all_experts" if all_experts else "route_coverage"
+            expected_threshold = None if all_experts else thresholds[index]
+            expected_id = (
+                "all-experts-bf16"
+                if all_experts
+                else f"coverage-{round(thresholds[index] * 100)}-bf16"
+            )
+            if (
+                row["mode"] != expected_mode
+                or row["coverage_threshold"] != expected_threshold
+                or row["policy_id"] != expected_id
+                or [layer["layer_index"] for layer in row["layers"]] != expected_layers
+            ):
+                raise ContractError("Route coverage candidate identity is inconsistent")
+            restored_count = 0
+            for layer_index, layer in enumerate(row["layers"]):
+                counts = calibration[layer_index]["expert_counts"]
+                if all_experts:
+                    expected_experts = list(range(64))
+                    expected_coverage = 1.0
+                else:
+                    expected_experts, expected_coverage = _experts_for_route_coverage(
+                        counts, thresholds[index]
+                    )
+                if (
+                    layer["expert_ids"] != expected_experts
+                    or not math.isclose(
+                        layer["assignment_coverage"],
+                        expected_coverage,
+                        rel_tol=1e-9,
+                        abs_tol=1e-12,
+                    )
+                    or not previous_sets[layer_index].issubset(expected_experts)
+                ):
+                    raise ContractError(
+                        "Route coverage expert selection is inconsistent"
+                    )
+                previous_sets[layer_index] = set(expected_experts)
+                restored_count += len(expected_experts)
+            expected_extra = restored_count * storage["single_expert_extra_bytes"]
+            expected_mixed = storage["all_q4_bytes"] + expected_extra
+            expected_bpw = expected_mixed * 8 / storage["total_expert_weight_count"]
+            if (
+                row["restored_expert_count"] != restored_count
+                or row["extra_bytes"] != expected_extra
+                or row["mixed_bytes"] != expected_mixed
+                or not math.isclose(row["effective_bpw"], expected_bpw, rel_tol=1e-9)
+            ):
+                raise ContractError("Route coverage storage is inconsistent")
+        quality = document["quality_gate"]
+        passing = [
+            row
+            for row in rows
+            if row["metrics"]["relative_perplexity_change"]
+            <= quality["maximum_relative_perplexity_increase"]
+            and row["metrics"]["router_exact_set_agreement"]
+            >= quality["minimum_router_exact_set_agreement"]
+        ]
+        expected_first = passing[0]["policy_id"] if passing else None
+        if quality["first_passing_policy_id"] != expected_first:
+            raise ContractError("Route coverage quality gate result is inconsistent")
+        upper = rows[-1]["metrics"]
+        upper_bound = (
+            math.isclose(upper["relative_perplexity_change"], 0.0, abs_tol=1e-12)
+            and math.isclose(upper["router_exact_set_agreement"], 1.0)
+            and math.isclose(upper["logit_max_absolute_error"], 0.0, abs_tol=1e-12)
+        )
+        gates = document["gates"]
+        expected = {
+            "reference_finite": reference["finite"],
+            "all_q4_finite": baseline["finite"],
+            "dataset_split_disjoint": not bool(
+                set(calibration_ids) & set(evaluation_ids)
+            ),
+            "calibration_complete": len(calibration) == 16,
+            "candidate_progression": len(rows) == len(thresholds) + 1,
+            "matrix_finite": all(row["finite"] for row in rows),
+            "all_experts_upper_bound": upper_bound,
+            "quality_gate_unchanged": math.isclose(
+                quality["maximum_relative_perplexity_increase"], 0.01
+            )
+            and math.isclose(quality["minimum_router_exact_set_agreement"], 0.99),
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Route coverage gate does not match evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Route coverage overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Route coverage status is inconsistent")
     elif kind == "traffic_source_ledger":
         from .traffic_model import (
             TrafficModelError,
