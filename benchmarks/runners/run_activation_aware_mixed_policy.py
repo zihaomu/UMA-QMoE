@@ -361,11 +361,16 @@ def main() -> int:
             gate_up = layer15.mlp.experts.gate_up_proj[expert_index]
             gate, up = gate_up.split(INTERMEDIATE_SIZE, dim=0)
             prefix = f"model.layers.15.mlp.experts.{expert_index}"
-            for projection, source in (("gate_proj", gate), ("up_proj", up)):
+            for projection, projection_source in (
+                ("gate_proj", gate),
+                ("up_proj", up),
+            ):
                 restored, tensor = _activation_weighted_q4(
-                    source, gate_importance[expert_index].to("cuda:0"), torch
+                    projection_source,
+                    gate_importance[expert_index].to("cuda:0"),
+                    torch,
                 )
-                source.copy_(restored)
+                projection_source.copy_(restored)
                 encoded_tensors[f"{prefix}.{projection}.weight"] = tensor
             down = layer15.mlp.experts.down_proj[expert_index]
             restored, tensor = _activation_weighted_q4(
