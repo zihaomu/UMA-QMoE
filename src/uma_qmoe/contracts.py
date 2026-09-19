@@ -40,6 +40,7 @@ SCHEMA_BY_KIND = {
     "oracle_smoke": "oracle_smoke.schema.json",
     "packed_q4_kernel_evidence": "packed_q4_kernel_evidence.schema.json",
     "public_baseline": "public_baseline.schema.json",
+    "quantization_compensation_search": "quantization_compensation_search.schema.json",
     "reference_host_baseline": "reference_host_baseline.schema.json",
     "reference_oracle_comparison": "reference_oracle_comparison.schema.json",
     "reference_oracle_policy": "reference_oracle_policy.schema.json",
@@ -762,6 +763,126 @@ def validate_document(
             raise ContractError("Route coverage overall gate is inconsistent")
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Route coverage status is inconsistent")
+    elif kind == "quantization_compensation_search":
+        source_ids = document["method"]["candidate_ids"]
+        rows = document["candidate_rows"]
+        reference = document["reference"]
+        source_baseline = document["source_all_q4_baseline"]
+        storage = document["storage"]
+        quality = document["quality_gate"]
+        expected_specs = [
+            ("q4-g128", 4, 128, 0),
+            ("q4-g128-r1", 4, 128, 1),
+            ("q4-g64", 4, 64, 0),
+            ("q4-g128-r2", 4, 128, 2),
+            ("q4-g32", 4, 32, 0),
+            ("q4-g128-r4", 4, 128, 4),
+            ("q5-g128", 5, 128, 0),
+            ("q4-g128-r8", 4, 128, 8),
+            ("q4-g16", 4, 16, 0),
+            ("q6-g128", 6, 128, 0),
+            ("q4-g128-r16", 4, 128, 16),
+            ("q8-g128", 8, 128, 0),
+            ("bf16-upper-bound", 16, None, 0),
+        ]
+        if source_ids != [spec[0] for spec in expected_specs] or len(rows) != len(
+            expected_specs
+        ):
+            raise ContractError("Compensation candidate progression is inconsistent")
+        if not math.isclose(
+            reference["perplexity"],
+            math.exp(reference["nll"]),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ContractError("Compensation reference perplexity is inconsistent")
+        _validate_quality_metrics(source_baseline, reference, "Compensation source")
+        total_weights = storage["total_expert_weight_count"]
+        expected_pack_bpw = storage["all_q4_pack_bytes"] * 8 / total_weights
+        if not math.isclose(
+            storage["all_q4_pack_effective_bpw"], expected_pack_bpw, rel_tol=1e-12
+        ):
+            raise ContractError("Compensation Q4 pack storage is inconsistent")
+        for row, (candidate_id, bits, group_size, residual_count) in zip(
+            rows, expected_specs, strict=True
+        ):
+            _validate_quality_metrics(row["metrics"], reference, "Compensation")
+            if (
+                row["candidate_id"] != candidate_id
+                or row["bits"] != bits
+                or row["group_size"] != group_size
+                or row["residual_values_per_group"] != residual_count
+                or row["finite"] != row["metrics"]["finite"]
+            ):
+                raise ContractError("Compensation candidate identity is inconsistent")
+            primary_bpw = float(bits)
+            scale_bpw = 0.0 if group_size is None else 32.0 / group_size
+            residual_bpw = (
+                0.0 if group_size is None else residual_count * 24.0 / group_size
+            )
+            if candidate_id == "q4-g128":
+                effective_bpw = expected_pack_bpw
+                payload_bytes = storage["all_q4_pack_bytes"]
+            elif candidate_id.startswith("q4-g128-r"):
+                effective_bpw = expected_pack_bpw + residual_bpw
+                payload_bytes = math.ceil(effective_bpw * total_weights / 8)
+            else:
+                effective_bpw = primary_bpw + scale_bpw + residual_bpw
+                payload_bytes = math.ceil(effective_bpw * total_weights / 8)
+            if (
+                not math.isclose(row["primary_bpw"], primary_bpw, rel_tol=1e-12)
+                or not math.isclose(row["scale_bpw"], scale_bpw, rel_tol=1e-12)
+                or not math.isclose(row["residual_bpw"], residual_bpw, rel_tol=1e-12)
+                or not math.isclose(row["effective_bpw"], effective_bpw, rel_tol=1e-12)
+                or row["projected_payload_bytes"] != payload_bytes
+            ):
+                raise ContractError("Compensation candidate storage is inconsistent")
+        passing = [
+            row
+            for row in rows
+            if row["metrics"]["relative_perplexity_change"]
+            <= quality["maximum_relative_perplexity_increase"]
+            and row["metrics"]["router_exact_set_agreement"]
+            >= quality["minimum_router_exact_set_agreement"]
+        ]
+        expected_first = passing[0]["candidate_id"] if passing else None
+        if quality["first_passing_candidate_id"] != expected_first:
+            raise ContractError("Compensation quality gate result is inconsistent")
+        observed_baseline = rows[0]["metrics"]
+        baseline_reproduced = math.isclose(
+            observed_baseline["nll"], source_baseline["nll"], abs_tol=1e-6
+        ) and math.isclose(
+            observed_baseline["router_exact_set_agreement"],
+            source_baseline["router_exact_set_agreement"],
+            abs_tol=1e-12,
+        )
+        upper = rows[-1]["metrics"]
+        upper_bound = (
+            math.isclose(upper["relative_perplexity_change"], 0.0, abs_tol=1e-12)
+            and math.isclose(upper["router_exact_set_agreement"], 1.0)
+            and math.isclose(upper["logit_max_absolute_error"], 0.0, abs_tol=1e-12)
+        )
+        expected = {
+            "source_evidence_compatible": True,
+            "dataset_identity": True,
+            "reference_finite": reference["finite"],
+            "candidate_progression": len(rows) == len(expected_specs),
+            "matrix_finite": all(row["finite"] for row in rows),
+            "q4_baseline_reproduced": baseline_reproduced,
+            "bf16_upper_bound": upper_bound,
+            "quality_gate_unchanged": math.isclose(
+                quality["maximum_relative_perplexity_increase"], 0.01
+            )
+            and math.isclose(quality["minimum_router_exact_set_agreement"], 0.99),
+        }
+        gates = document["gates"]
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("Compensation gate does not match evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("Compensation overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Compensation status is inconsistent")
     elif kind == "traffic_source_ledger":
         from .traffic_model import (
             TrafficModelError,
