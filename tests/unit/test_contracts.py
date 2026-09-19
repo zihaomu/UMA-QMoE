@@ -63,9 +63,9 @@ def test_pinned_olmoe_manifest_matches_architecture_golden_values() -> None:
 
 
 def test_pinned_qwen_moe_manifest_matches_architecture_golden_values() -> None:
-    manifest = validate_file(QWEN_MODEL_PATH)
+    manifest = validate_file(QWEN_MODEL_PATH, require_frozen=True)
 
-    assert manifest["status"] == "draft"
+    assert manifest["status"] == "frozen"
     assert manifest["model_revision"] == "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9"
     assert manifest["architecture"] == {
         "class_name": "Qwen2MoeForCausalLM",
@@ -83,6 +83,14 @@ def test_pinned_qwen_moe_manifest_matches_architecture_golden_values() -> None:
     assert manifest["dtypes"]["uploaded_weights"] == "bfloat16"
     assert manifest["dtypes"]["api_reported_parameter_counts"] == {
         "BF16": 14_315_784_192
+    }
+    assert manifest["dtypes"]["observed_tensor_dtypes"] == ["BF16"]
+    assert manifest["weights"]["tensor_inventory"] == {
+        "path": "models/inventories/qwen1_5_moe_a2_7b_bf16.json",
+        "sha256": "9a3abfe176cd7a704b950573c4ce7d2967d11c36f8792881de33a2e8e7365be0",
+        "source_manifest_sha256": (
+            "b4098c447e381fa967707e46dd7e6fe2308ff292c00769fb81ac079b10681ee7"
+        ),
     }
     assert manifest["dtypes"]["evidence_conflict"] is False
     assert len(manifest["weights"]["artifacts"]) == 9

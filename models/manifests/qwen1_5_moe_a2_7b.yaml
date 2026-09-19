@@ -1,6 +1,6 @@
 schema_version: 1
 kind: model_manifest
-status: draft
+status: frozen
 model_id: Qwen/Qwen1.5-MoE-A2.7B
 model_revision: 1a758c50ecb6350748b9ce0a99d2352fd9fc11c9
 variant: base
@@ -57,12 +57,14 @@ dtypes:
   model_card_uploaded_weights_claim: bfloat16
   evidence_conflict: false
   oracle_compute: bfloat16
-  local_tensor_scan: pending_download
+  local_tensor_scan: verified
+  observed_tensor_dtypes:
+  - BF16
 weights:
   format: safetensors
-  hash_source: huggingface_lfs_metadata
-  local_verification: pending_download
-  tensor_hashes_status: pending_local_scan
+  hash_source: local_sha256
+  local_verification: verified
+  tensor_hashes_status: verified
   artifacts:
   - path: model-00001-of-00008.safetensors
     size_bytes: 3999614664
@@ -91,6 +93,10 @@ weights:
   - path: model.safetensors.index.json
     size_bytes: 416452
     sha256: ece1b223efe32f4349d0dfa2a522249ac10bcb89369ed25b222c35175cd90b53
+  tensor_inventory:
+    path: models/inventories/qwen1_5_moe_a2_7b_bf16.json
+    sha256: 9a3abfe176cd7a704b950573c4ce7d2967d11c36f8792881de33a2e8e7365be0
+    source_manifest_sha256: b4098c447e381fa967707e46dd7e6fe2308ff292c00769fb81ac079b10681ee7
 provenance:
   provider: huggingface
   repository: Qwen/Qwen1.5-MoE-A2.7B
