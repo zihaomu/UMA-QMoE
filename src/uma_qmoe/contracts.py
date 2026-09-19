@@ -17,6 +17,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 SCHEMA_BY_KIND = {
     "allocation_matrix": "allocation_matrix.schema.json",
     "allocation_matrix_v2": "allocation_matrix_v2.schema.json",
+    "activation_aware_mixed_policy": "activation_aware_mixed_policy.schema.json",
     "artifact_verification": "artifact_verification.schema.json",
     "bandwidth_soak": "bandwidth_soak.schema.json",
     "benchmark_contract": "benchmark_contract.schema.json",
@@ -1094,6 +1095,124 @@ def validate_document(
             raise ContractError("Router compensation overall gate is inconsistent")
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Router compensation status is inconsistent")
+    elif kind == "activation_aware_mixed_policy":
+        reference = document["reference"]
+        q8_base = document["q8_base_metrics"]
+        source_q8_base = document["source_q8_base_metrics"]
+        policy = document["policy"]
+        metrics = policy["metrics"]
+        storage = document["storage"]
+        quality = document["quality_gate"]
+        dataset = document["dataset"]
+        q4_layers = policy["q4_layers"]
+        q8_layers = policy["q8_layers"]
+        bf16_layers = policy["bf16_layers"]
+        if (
+            q4_layers != [15]
+            or q8_layers != [8, 11, 12, 13, 14]
+            or bf16_layers
+            != [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                9,
+                10,
+            ]
+        ):
+            raise ContractError("Activation-aware mixed policy layers are inconsistent")
+        if sorted(q4_layers + q8_layers + bf16_layers) != list(range(16)):
+            raise ContractError(
+                "Activation-aware mixed policy must partition all layers"
+            )
+        if set(dataset["calibration_sample_ids"]) & set(
+            dataset["evaluation_sample_ids"]
+        ):
+            raise ContractError("Activation-aware mixed policy splits must be disjoint")
+        if not math.isclose(
+            reference["perplexity"],
+            math.exp(reference["nll"]),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ContractError(
+                "Activation-aware mixed policy reference perplexity is inconsistent"
+            )
+        _validate_quality_metrics(q8_base, reference, "Q8 base policy")
+        _validate_quality_metrics(source_q8_base, reference, "Source Q8 base policy")
+        _validate_quality_metrics(metrics, reference, "Activation-aware mixed policy")
+        q8_reproduced = math.isclose(
+            q8_base["nll"], source_q8_base["nll"], abs_tol=1e-6
+        ) and math.isclose(
+            q8_base["router_exact_set_agreement"],
+            source_q8_base["router_exact_set_agreement"],
+            abs_tol=1e-12,
+        )
+        if document["q8_base_reproduced"] != q8_reproduced:
+            raise ContractError(
+                "Activation-aware mixed policy Q8 reproduction is inconsistent"
+            )
+        expected_bpw = (
+            len(q4_layers) * storage["q4_effective_bpw"]
+            + len(q8_layers) * storage["q8_effective_bpw"]
+            + len(bf16_layers) * storage["bf16_effective_bpw"]
+        ) / 16
+        expected_bytes = math.ceil(
+            expected_bpw * storage["total_expert_weight_count"] / 8
+        )
+        if (
+            not math.isclose(storage["policy_effective_bpw"], expected_bpw)
+            or storage["projected_payload_bytes"] != expected_bytes
+            or not math.isclose(policy["effective_bpw"], expected_bpw)
+            or policy["projected_payload_bytes"] != expected_bytes
+        ):
+            raise ContractError("Activation-aware mixed policy storage is inconsistent")
+        q8_passed = (
+            q8_base["relative_perplexity_change"]
+            <= quality["maximum_relative_perplexity_increase"]
+            and q8_base["router_exact_set_agreement"]
+            >= quality["minimum_router_exact_set_agreement"]
+        )
+        policy_passed = (
+            metrics["relative_perplexity_change"]
+            <= quality["maximum_relative_perplexity_increase"]
+            and metrics["router_exact_set_agreement"]
+            >= quality["minimum_router_exact_set_agreement"]
+        )
+        gates = document["gates"]
+        expected = {
+            "source_evidence_compatible": True,
+            "dataset_identity": True,
+            "dataset_split_disjoint": not bool(
+                set(dataset["calibration_sample_ids"])
+                & set(dataset["evaluation_sample_ids"])
+            ),
+            "reference_finite": reference["finite"],
+            "q8_base_reproduced": q8_reproduced,
+            "q8_base_quality_passed": q8_passed,
+            "policy_finite": metrics["finite"],
+            "policy_quality_passed": policy_passed,
+            "storage_accounting": True,
+            "quality_gate_unchanged": math.isclose(
+                quality["maximum_relative_perplexity_increase"], 0.01
+            )
+            and math.isclose(quality["minimum_router_exact_set_agreement"], 0.99),
+        }
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError(
+                "Activation-aware mixed policy gate does not match evidence"
+            )
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError(
+                "Activation-aware mixed policy overall gate is inconsistent"
+            )
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("Activation-aware mixed policy status is inconsistent")
     elif kind == "layer_precision_search":
         reference = document["reference"]
         sources = document["source_uniform_metrics"]
