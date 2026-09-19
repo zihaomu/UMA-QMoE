@@ -31,11 +31,12 @@
         "source_route_coverage_evidence": { "$ref": "#/$defs/identity" },
         "prompt_fixture": { "$ref": "#/$defs/identity" },
         "candidate_ids": {
-          "type": "array", "minItems": 13, "maxItems": 13,
+          "type": "array", "minItems": 16, "maxItems": 16,
           "prefixItems": [
             { "const": "q4-g128" }, { "const": "q4-g128-r1" }, { "const": "q4-g64" }, { "const": "q4-g128-r2" },
             { "const": "q4-g32" }, { "const": "q4-g128-r4" }, { "const": "q5-g128" }, { "const": "q4-g128-r8" },
-            { "const": "q4-g16" }, { "const": "q6-g128" }, { "const": "q4-g128-r16" }, { "const": "q8-g128" }, { "const": "bf16-upper-bound" }
+            { "const": "q4-g16" }, { "const": "q6-g128" }, { "const": "q4-g128-r16" }, { "const": "q8-g128" },
+            { "const": "q9-g128" }, { "const": "q10-g128" }, { "const": "q12-g128" }, { "const": "bf16-upper-bound" }
           ],
           "items": false
         }
@@ -62,13 +63,13 @@
       }
     },
     "candidate_rows": {
-      "type": "array", "minItems": 13, "maxItems": 13,
+      "type": "array", "minItems": 16, "maxItems": 16,
       "items": {
         "type": "object", "additionalProperties": false,
         "required": ["candidate_id", "bits", "group_size", "residual_values_per_group", "metrics", "primary_bpw", "scale_bpw", "residual_bpw", "effective_bpw", "projected_payload_bytes", "finite"],
         "properties": {
           "candidate_id": { "type": "string", "minLength": 1 },
-          "bits": { "enum": [4, 5, 6, 8, 16] },
+          "bits": { "enum": [4, 5, 6, 8, 9, 10, 12, 16] },
           "group_size": { "oneOf": [{ "type": "null" }, { "enum": [16, 32, 64, 128] }] },
           "residual_values_per_group": { "type": "integer", "minimum": 0, "maximum": 16 },
           "metrics": { "$ref": "#/$defs/metrics" },

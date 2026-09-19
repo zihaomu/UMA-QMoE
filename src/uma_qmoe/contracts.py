@@ -783,6 +783,9 @@ def validate_document(
             ("q6-g128", 6, 128, 0),
             ("q4-g128-r16", 4, 128, 16),
             ("q8-g128", 8, 128, 0),
+            ("q9-g128", 9, 128, 0),
+            ("q10-g128", 10, 128, 0),
+            ("q12-g128", 12, 128, 0),
             ("bf16-upper-bound", 16, None, 0),
         ]
         if source_ids != [spec[0] for spec in expected_specs] or len(rows) != len(
