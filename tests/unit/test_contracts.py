@@ -20,6 +20,7 @@ from uma_qmoe.machine import collect_machine_baseline
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = PROJECT_ROOT / "models/manifests/olmoe_1b_7b_0125.yaml"
+QWEN_MODEL_PATH = PROJECT_ROOT / "models/manifests/qwen1_5_moe_a2_7b.yaml"
 CONTRACT_PATH = PROJECT_ROOT / "benchmarks/contracts/olmoe_1b_7b_0125.yaml"
 
 
@@ -59,6 +60,32 @@ def test_pinned_olmoe_manifest_matches_architecture_golden_values() -> None:
     assert manifest["dtypes"]["api_reported_parameter_counts"] == {"F32": 6919161856}
     assert manifest["dtypes"]["model_card_uploaded_weights_claim"] == "bfloat16"
     assert manifest["dtypes"]["evidence_conflict"] is True
+
+
+def test_pinned_qwen_moe_manifest_matches_architecture_golden_values() -> None:
+    manifest = validate_file(QWEN_MODEL_PATH)
+
+    assert manifest["status"] == "draft"
+    assert manifest["model_revision"] == "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9"
+    assert manifest["architecture"] == {
+        "class_name": "Qwen2MoeForCausalLM",
+        "model_type": "qwen2_moe",
+        "num_layers": 24,
+        "hidden_size": 2048,
+        "expert_intermediate_size": 5632,
+        "num_experts": 60,
+        "top_k": 4,
+        "max_position_embeddings": 8192,
+        "normalize_top_k_probability": False,
+        "declared_total_parameters": "14.3B",
+        "declared_active_parameters": "2.7B",
+    }
+    assert manifest["dtypes"]["uploaded_weights"] == "bfloat16"
+    assert manifest["dtypes"]["api_reported_parameter_counts"] == {
+        "BF16": 14_315_784_192
+    }
+    assert manifest["dtypes"]["evidence_conflict"] is False
+    assert len(manifest["weights"]["artifacts"]) == 9
 
 
 def test_semantic_hash_is_stable_across_key_order_and_resolution_time() -> None:
