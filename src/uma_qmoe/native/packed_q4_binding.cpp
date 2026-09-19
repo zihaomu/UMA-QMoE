@@ -61,6 +61,20 @@ torch::Tensor uma_qmoe_q4_moe_forward_cuda(
     const torch::Tensor& down_scales,
     std::int64_t group_size);
 
+torch::Tensor uma_qmoe_q4_moe_prefill_cuda(
+    const torch::Tensor& hidden,
+    const torch::Tensor& expert_indices,
+    const torch::Tensor& routing_weights,
+    const torch::Tensor& route_order,
+    const torch::Tensor& expert_offsets,
+    const torch::Tensor& gate_packed,
+    const torch::Tensor& gate_scales,
+    const torch::Tensor& up_packed,
+    const torch::Tensor& up_scales,
+    const torch::Tensor& down_packed,
+    const torch::Tensor& down_scales,
+    std::int64_t group_size);
+
 torch::Tensor q4_linear(
     const torch::Tensor& input,
     const torch::Tensor& packed,
@@ -166,6 +180,88 @@ torch::Tensor q4_moe_forward(
       group_size);
 }
 
+torch::Tensor q4_moe_prefill(
+    const torch::Tensor& hidden,
+    const torch::Tensor& expert_indices,
+    const torch::Tensor& routing_weights,
+    const torch::Tensor& route_order,
+    const torch::Tensor& expert_offsets,
+    const torch::Tensor& gate_packed,
+    const torch::Tensor& gate_scales,
+    const torch::Tensor& up_packed,
+    const torch::Tensor& up_scales,
+    const torch::Tensor& down_packed,
+    const torch::Tensor& down_scales,
+    std::int64_t group_size) {
+  TORCH_CHECK(hidden.is_cuda(), "Q4 MoE prefill input must be on a CUDA/HIP device");
+  TORCH_CHECK(
+      hidden.scalar_type() == torch::kBFloat16,
+      "Q4 MoE prefill accepts BF16 activations only");
+  TORCH_CHECK(
+      hidden.dim() == 2 && hidden.size(0) > 1 && hidden.size(1) == kHiddenSize,
+      "Q4 MoE prefill input must have shape [tokens > 1, 2048]");
+  TORCH_CHECK(hidden.is_contiguous(), "Q4 MoE prefill input must be contiguous");
+  check_device_tensor(expert_indices, hidden, "expert indices", torch::kInt64);
+  check_device_tensor(routing_weights, hidden, "routing weights", torch::kBFloat16);
+  check_device_tensor(route_order, hidden, "route order", torch::kInt64);
+  check_device_tensor(expert_offsets, hidden, "expert offsets", torch::kInt64);
+  TORCH_CHECK(
+      expert_indices.dim() == 2 && expert_indices.size(0) == hidden.size(0) &&
+          expert_indices.size(1) == kTopK,
+      "expert indices must have shape [tokens, 8]");
+  TORCH_CHECK(
+      routing_weights.sizes() == expert_indices.sizes(),
+      "routing weights must match expert indices");
+  TORCH_CHECK(
+      route_order.dim() == 1 && route_order.numel() == expert_indices.numel(),
+      "route order must contain every flattened route");
+  TORCH_CHECK(
+      expert_offsets.dim() == 1 && expert_offsets.numel() == kExpertCount + 1,
+      "expert offsets must have shape [65]");
+  TORCH_CHECK(group_size == 128, "Q4 MoE prefill requires group size 128");
+
+  check_device_tensor(gate_packed, hidden, "gate packed", torch::kUInt8);
+  check_device_tensor(up_packed, hidden, "up packed", torch::kUInt8);
+  check_device_tensor(down_packed, hidden, "down packed", torch::kUInt8);
+  check_device_tensor(gate_scales, hidden, "gate scales", torch::kFloat32);
+  check_device_tensor(up_scales, hidden, "up scales", torch::kFloat32);
+  check_device_tensor(down_scales, hidden, "down scales", torch::kFloat32);
+  check_projection_storage(
+      gate_packed,
+      gate_scales,
+      kIntermediateSize,
+      kHiddenSize,
+      group_size,
+      "gate");
+  check_projection_storage(
+      up_packed,
+      up_scales,
+      kIntermediateSize,
+      kHiddenSize,
+      group_size,
+      "up");
+  check_projection_storage(
+      down_packed,
+      down_scales,
+      kHiddenSize,
+      kIntermediateSize,
+      group_size,
+      "down");
+  return uma_qmoe_q4_moe_prefill_cuda(
+      hidden,
+      expert_indices,
+      routing_weights,
+      route_order,
+      expert_offsets,
+      gate_packed,
+      gate_scales,
+      up_packed,
+      up_scales,
+      down_packed,
+      down_scales,
+      group_size);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
   module.def(
       "q4_linear",
@@ -175,4 +271,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
       "q4_moe_forward",
       &q4_moe_forward,
       "UMA-QMoE fused Gate+Up+SwiGLU+Down Top-8 packed-Q4 MoE (CUDA/HIP)");
+  module.def(
+      "q4_moe_prefill",
+      &q4_moe_prefill,
+      "UMA-QMoE expert-sorted packed-Q4 MoE prefill (CUDA/HIP)");
 }

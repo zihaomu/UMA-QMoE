@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import threading
 from typing import Any
 
@@ -34,6 +35,17 @@ def native_kernel_source_sha256() -> str:
         digest.update(b"\0")
         digest.update(path.read_bytes())
     return digest.hexdigest()
+
+
+def _stage_native_sources(build_directory: Path) -> tuple[Path, ...]:
+    """Copy immutable package sources before Torch/HIP may rewrite ``.cu`` files."""
+
+    staged = []
+    for source in _source_paths():
+        destination = build_directory / source.name
+        shutil.copyfile(source, destination)
+        staged.append(destination)
+    return tuple(staged)
 
 
 def observed_native_platform(torch: Any, device: Any = 0) -> str:
@@ -81,6 +93,7 @@ def load_native_extension(
         else:
             target_build = Path(build_directory)
         target_build.mkdir(parents=True, exist_ok=True)
+        staged_sources = _stage_native_sources(target_build)
 
         arch_name = "PYTORCH_ROCM_ARCH" if torch.version.hip else "TORCH_CUDA_ARCH_LIST"
         arch_value = "gfx1151" if torch.version.hip else "12.1a"
@@ -88,8 +101,8 @@ def load_native_extension(
         os.environ[arch_name] = arch_value
         try:
             extension = load(
-                name=f"uma_qmoe_packed_q4_{platform}_v2",
-                sources=[str(path) for path in _source_paths()],
+                name=f"uma_qmoe_packed_q4_{platform}_v3",
+                sources=[str(path) for path in staged_sources],
                 build_directory=str(target_build),
                 extra_cflags=["-O3", "-std=c++17"],
                 extra_cuda_cflags=["-O3", "-std=c++17"],
@@ -155,7 +168,7 @@ class PackedQ4NativeBackend:
             raise ContractError(f"unsupported packed Q4 platform {platform!r}")
         missing = [
             name
-            for name in ("q4_linear", "q4_moe_forward")
+            for name in ("q4_linear", "q4_moe_forward", "q4_moe_prefill")
             if not hasattr(extension, name)
         ]
         if missing:
@@ -366,7 +379,7 @@ class PackedQ4NativeBackend:
             tensor.record_stream(stream)
         indices = expert_indices.to(dtype=torch.int64).contiguous()
         weights = routing_weights.to(dtype=torch.bfloat16).contiguous()
-        output = self.extension.q4_moe_forward(
+        arguments = (
             flattened.contiguous(),
             indices,
             weights,
@@ -378,6 +391,30 @@ class PackedQ4NativeBackend:
             layer.down_scales,
             layer.group_size,
         )
+        if flattened.shape[0] == 1:
+            output = self.extension.q4_moe_forward(*arguments)
+        else:
+            flattened_indices = indices.reshape(-1)
+            route_order = torch.argsort(flattened_indices, stable=True)
+            expert_counts = torch.bincount(flattened_indices, minlength=64)
+            expert_offsets = torch.cat(
+                (
+                    torch.zeros(
+                        1,
+                        dtype=torch.int64,
+                        device=hidden_states.device,
+                    ),
+                    torch.cumsum(expert_counts, dim=0),
+                )
+            )
+            output = self.extension.q4_moe_prefill(
+                arguments[0],
+                arguments[1],
+                arguments[2],
+                route_order,
+                expert_offsets,
+                *arguments[3:],
+            )
         return output.reshape(hidden_states.shape)
 
 

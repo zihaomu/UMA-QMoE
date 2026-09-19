@@ -164,10 +164,54 @@ def main() -> int:
             moe_result = _agreement(performance_output, reference_output, functional)
             moe_result["output_sha256"] = _tensor_sha256(performance_output)
 
+            prefill_hidden = torch.linspace(
+                -0.5,
+                0.5,
+                4 * 2048,
+                dtype=torch.float32,
+                device="cuda:0",
+            ).reshape(4, 2048).to(torch.bfloat16)
+            prefill_experts = experts.repeat(4, 1)
+            prefill_weights = weights.repeat(4, 1)
+            prefill_reference = torch.ops.uma_qmoe.moe_forward(
+                prefill_hidden,
+                prefill_experts,
+                prefill_weights,
+                0,
+                handle,
+                False,
+            )
+            prefill_output = torch.ops.uma_qmoe.moe_forward(
+                prefill_hidden,
+                prefill_experts,
+                prefill_weights,
+                0,
+                handle,
+                True,
+            )
+            torch.cuda.synchronize()
+            prefill_result = _agreement(
+                prefill_output, prefill_reference, functional
+            )
+            prefill_result["output_sha256"] = _tensor_sha256(prefill_output)
+
             samples = _time_cuda(
                 torch,
                 lambda: torch.ops.uma_qmoe.moe_forward(
                     hidden, experts, weights, 0, handle, True
+                ),
+                args.warmup_iterations,
+                args.measured_iterations,
+            )
+            prefill_samples = _time_cuda(
+                torch,
+                lambda: torch.ops.uma_qmoe.moe_forward(
+                    prefill_hidden,
+                    prefill_experts,
+                    prefill_weights,
+                    0,
+                    handle,
+                    True,
                 ),
                 args.warmup_iterations,
                 args.measured_iterations,
@@ -189,6 +233,13 @@ def main() -> int:
             and moe_result["cosine_similarity"]
             >= acceptance["minimum_cosine_similarity"]
         )
+        prefill_passed = (
+            prefill_result["finite"]
+            and prefill_result["max_absolute_error"]
+            <= acceptance["max_absolute_error"]
+            and prefill_result["cosine_similarity"]
+            >= acceptance["minimum_cosine_similarity"]
+        )
         expected_platform = {
             "halo3": "hip_gfx1151",
             "spark1": "cuda_sm121",
@@ -202,7 +253,10 @@ def main() -> int:
             "no_dequantized_weight_cache": cache["dequantized_weight_bytes"] == 0,
             "projection_correctness": projection_passed,
             "moe_correctness": moe_passed,
+            "prefill_moe_correctness": prefill_passed,
             "performance_mode_executed": len(samples) == args.measured_iterations,
+            "prefill_performance_mode_executed": len(prefill_samples)
+            == args.measured_iterations,
         }
         gates["overall_passed"] = all(gates.values())
         document = {
@@ -222,8 +276,8 @@ def main() -> int:
                 "platform": backend.platform,
                 "device_name": torch.cuda.get_device_name(0),
                 "source_sha256": native_kernel_source_sha256(),
-                "abi": "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-fused-moe-v2",
-                "execution_strategy": "two-launch-gate-up-swiglu-down-route",
+                "abi": "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3",
+                "execution_strategy": "decode-two-launch-prefill-expert-sorted-three-stage",
                 "compiled_for_target": True,
                 "reads_packed_weights_directly": True,
                 "full_dequantized_weight_cache": False,
@@ -231,6 +285,7 @@ def main() -> int:
             "workload": {
                 "layer_index": 0,
                 "tokens": 1,
+                "prefill_tokens": 4,
                 "top_k": 8,
                 "unique_experts": 8,
                 "warmup_iterations": args.warmup_iterations,
@@ -239,6 +294,7 @@ def main() -> int:
             "correctness": {
                 "projection_results": projection_results,
                 "moe_forward": moe_result,
+                "prefill_moe_forward": prefill_result,
                 "acceptance": acceptance,
             },
             "performance": {
@@ -247,6 +303,11 @@ def main() -> int:
                 "median_milliseconds": statistics.median(samples),
                 "p95_milliseconds": sorted(samples)[
                     max(0, math.ceil(0.95 * len(samples)) - 1)
+                ],
+                "prefill_samples_milliseconds": prefill_samples,
+                "prefill_median_milliseconds": statistics.median(prefill_samples),
+                "prefill_p95_milliseconds": sorted(prefill_samples)[
+                    max(0, math.ceil(0.95 * len(prefill_samples)) - 1)
                 ],
                 "compressed_cache_tensor_count": cache["tensor_count"],
                 "compressed_cache_bytes": cache["device_storage_bytes"],

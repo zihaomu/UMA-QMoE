@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from uma_qmoe.contracts import ContractError, validate_document
-from uma_qmoe.native_backend import PackedQ4NativeBackend, native_kernel_source_sha256
+from uma_qmoe.native_backend import (
+    PackedQ4NativeBackend,
+    _stage_native_sources,
+    native_kernel_source_sha256,
+)
 
 
 def _packed_evidence() -> dict:
@@ -176,12 +180,25 @@ def test_native_source_identity_is_stable_sha256() -> None:
     assert set(digest) <= set("0123456789abcdef")
 
 
+def test_native_sources_are_staged_outside_package_tree(tmp_path) -> None:
+    digest = native_kernel_source_sha256()
+    staged = _stage_native_sources(tmp_path)
+    assert {path.name for path in staged} == {
+        "packed_q4_binding.cpp",
+        "packed_q4_kernel.cu",
+    }
+    assert all(path.parent == tmp_path for path in staged)
+    staged[0].write_text("build-tool-generated content", encoding="utf-8")
+    assert native_kernel_source_sha256() == digest
+
+
 def test_native_backend_releases_closed_pack_cache() -> None:
     backend = PackedQ4NativeBackend(
         "cuda_sm121",
         SimpleNamespace(
             q4_linear=lambda *_args: None,
             q4_moe_forward=lambda *_args: None,
+            q4_moe_prefill=lambda *_args: None,
         ),
     )
     backend._cache[(1, "first", "cuda:0")] = object()
@@ -212,6 +229,39 @@ def test_packed_q4_fused_v2_requires_execution_strategy() -> None:
         "two-launch-gate-up-swiglu-down-route"
     )
     validate_document(document)
+
+
+def test_packed_q4_v3_requires_prefill_evidence() -> None:
+    document = _packed_evidence()
+    document["kernel"]["abi"] = (
+        "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3"
+    )
+    document["kernel"]["execution_strategy"] = (
+        "decode-two-launch-prefill-expert-sorted-three-stage"
+    )
+    with pytest.raises(ContractError, match="prefill workload"):
+        validate_document(document)
+    document["workload"]["prefill_tokens"] = 4
+    document["correctness"]["prefill_moe_forward"] = copy.deepcopy(
+        document["correctness"]["moe_forward"]
+    )
+    document["performance"].update(
+        {
+            "prefill_samples_milliseconds": [2.0, 2.1, 2.2],
+            "prefill_median_milliseconds": 2.1,
+            "prefill_p95_milliseconds": 2.2,
+        }
+    )
+    document["gates"].update(
+        {
+            "prefill_moe_correctness": True,
+            "prefill_performance_mode_executed": True,
+        }
+    )
+    validate_document(document)
+    document["performance"]["prefill_median_milliseconds"] = 99.0
+    with pytest.raises(ContractError, match="prefill timing"):
+        validate_document(document)
 
 
 def test_mixed_precision_matrix_recomputes_ranking_and_deltas() -> None:
