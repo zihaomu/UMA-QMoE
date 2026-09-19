@@ -164,15 +164,16 @@ def main() -> int:
             moe_result = _agreement(performance_output, reference_output, functional)
             moe_result["output_sha256"] = _tensor_sha256(performance_output)
 
+            prefill_tokens = 32
             prefill_hidden = torch.linspace(
                 -0.5,
                 0.5,
-                4 * 2048,
+                prefill_tokens * 2048,
                 dtype=torch.float32,
                 device="cuda:0",
-            ).reshape(4, 2048).to(torch.bfloat16)
-            prefill_experts = experts.repeat(4, 1)
-            prefill_weights = weights.repeat(4, 1)
+            ).reshape(prefill_tokens, 2048).to(torch.bfloat16)
+            prefill_experts = experts.repeat(prefill_tokens, 1)
+            prefill_weights = weights.repeat(prefill_tokens, 1)
             prefill_reference = torch.ops.uma_qmoe.moe_forward(
                 prefill_hidden,
                 prefill_experts,
@@ -285,7 +286,7 @@ def main() -> int:
             "workload": {
                 "layer_index": 0,
                 "tokens": 1,
-                "prefill_tokens": 4,
+                "prefill_tokens": prefill_tokens,
                 "top_k": 8,
                 "unique_experts": 8,
                 "warmup_iterations": args.warmup_iterations,
