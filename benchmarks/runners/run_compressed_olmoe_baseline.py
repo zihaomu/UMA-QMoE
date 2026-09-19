@@ -25,6 +25,7 @@ from pytorch_reference_host import (
 )
 from uma_qmoe.compressed_loader import load_fixed_olmoe
 from uma_qmoe.native_backend import (
+    install_mixed_target_backend,
     install_packed_q4_backend,
     native_kernel_source_sha256,
 )
@@ -35,6 +36,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--expert-pack", type=Path, required=True)
+    parser.add_argument(
+        "--target-policy-id",
+        help="validated TargetPack policy id; omit only for canonical all-Q4 ExpertPack",
+    )
     parser.add_argument("--model-manifest-sha256", required=True)
     parser.add_argument("--prompt-fixture", type=Path, required=True)
     parser.add_argument("--prompt-id", default="general-001")
@@ -103,9 +108,13 @@ def main() -> int:
     )
     token_ids = _exact_token_ids(tokenizer, prompt, args.input_tokens)
     input_ids = torch.tensor([token_ids], dtype=torch.long, device="cuda:0")
-    native = install_packed_q4_backend(
-        build_directory=args.native_build_dir,
-        verbose=args.verbose_build,
+    backend_installer = (
+        install_mixed_target_backend
+        if args.target_policy_id
+        else install_packed_q4_backend
+    )
+    native = backend_installer(
+        build_directory=args.native_build_dir, verbose=args.verbose_build
     )
     if native.platform != expected_platform:
         raise RuntimeError(
@@ -119,6 +128,7 @@ def main() -> int:
         model_manifest_sha256=args.model_manifest_sha256,
         device="cuda:0",
         performance_mode=True,
+        target_policy_id=args.target_policy_id,
     ) as host:
         for _ in range(args.warmup_requests):
             _generate_once(
@@ -211,6 +221,7 @@ def main() -> int:
             "model_revision": MODEL_REVISION,
             "path": str(args.model.resolve()),
             "expert_pack_sha256": pack_sha256,
+            "target_policy_id": args.target_policy_id,
         },
         "workload": {
             "input_tokens": args.input_tokens,
