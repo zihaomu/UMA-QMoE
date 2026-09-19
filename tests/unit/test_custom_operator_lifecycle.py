@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import threading
 
+import numpy as np
 import pytest
 
+import uma_qmoe.custom_op as custom_op
 from uma_qmoe.contracts import ContractError
 from uma_qmoe.custom_op import (
     acquire_expert_pack,
@@ -63,3 +65,48 @@ def test_unregister_waits_for_active_call_and_rejects_new_calls() -> None:
     assert not worker.is_alive()
     assert not closer.is_alive()
     assert unregistered.is_set()
+
+
+def test_reference_preserves_transformers_fused_gate_up_execution() -> None:
+    gate = np.full((2, 3), 1.0, dtype=np.float32)
+    up = np.full((2, 3), 2.0, dtype=np.float32)
+    combined = custom_op._combine_gate_up_arrays(gate, up)
+    assert combined.shape == (4, 3)
+    assert np.array_equal(combined[:2], gate)
+    assert np.array_equal(combined[2:], up)
+
+    class Value:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def chunk(self, count: int, *, dim: int) -> tuple["Value", "Value"]:
+            assert count == 2
+            assert dim == -1
+            return Value("gate"), Value("up")
+
+        def mul_(self, other: "Value") -> "Value":
+            assert self.name == "silu(gate)"
+            assert other.name == "up"
+            self.name = "silu(gate)*up"
+            return self
+
+    class Functional:
+        linear_calls = 0
+
+        @classmethod
+        def linear(cls, selected: Value, weight: Value) -> Value:
+            assert selected.name == "selected"
+            assert weight.name == "gate_up"
+            cls.linear_calls += 1
+            return Value("gate_up_output")
+
+        @staticmethod
+        def silu(value: Value) -> Value:
+            assert value.name == "gate"
+            return Value("silu(gate)")
+
+    result = custom_op._fused_gate_up(
+        Value("selected"), Value("gate_up"), Functional
+    )
+    assert Functional.linear_calls == 1
+    assert result.name == "silu(gate)*up"
