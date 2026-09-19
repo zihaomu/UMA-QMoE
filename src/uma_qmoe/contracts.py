@@ -55,6 +55,7 @@ SCHEMA_BY_KIND = {
     "safe_uma_budget": "safe_uma_budget.schema.json",
     "target_inventory": "target_inventory.schema.json",
     "target_pack_manifest": "target_pack_manifest.schema.json",
+    "target_pack_host_quality": "target_pack_host_quality.schema.json",
     "tensor_inventory": "tensor_inventory.schema.json",
     "traffic_source_ledger": "traffic_source_ledger.schema.json",
     "spark_traffic_model": "spark_traffic_model.schema.json",
@@ -1214,6 +1215,54 @@ def validate_document(
             )
         if document["status"] != ("passed" if overall else "failed"):
             raise ContractError("Activation-aware mixed policy status is inconsistent")
+    elif kind == "target_pack_host_quality":
+        reference = document["reference"]
+        candidate = document["candidate"]
+        quality = document["quality_gate"]
+        loader = document["loader"]
+        if not math.isclose(
+            reference["perplexity"],
+            math.exp(reference["nll"]),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ContractError("TargetPack Host reference perplexity is inconsistent")
+        _validate_quality_metrics(candidate, reference, "TargetPack Host")
+        quality_passed = (
+            candidate["relative_perplexity_change"]
+            <= quality["maximum_relative_perplexity_increase"]
+            and candidate["router_exact_set_agreement"]
+            >= quality["minimum_router_exact_set_agreement"]
+        )
+        expected = {
+            "manifest_identity": True,
+            "policy_evidence_identity": True,
+            "dataset_identity": True,
+            "reference_finite": reference["finite"],
+            "candidate_finite": candidate["finite"],
+            "quality_passed": quality_passed,
+            "dense_only_checkpoint_load": (
+                loader["skipped_expert_tensor_count"] == 3072
+                and loader["loaded_expert_tensor_count"] == 0
+            ),
+            "no_expert_parameters": loader["expert_parameter_count"] == 0,
+            "single_pack_mapping": (
+                loader["expert_pack_mapping_count"] == 1
+                and loader["expert_pack_vma_count"] in {1, -1}
+            ),
+            "full_model_executed": len(
+                candidate["per_layer_router_exact_set_agreement"]
+            )
+            == 16,
+        }
+        gates = document["gates"]
+        if any(gates[name] != value for name, value in expected.items()):
+            raise ContractError("TargetPack Host gate does not match evidence")
+        overall = all(expected.values())
+        if gates["overall_passed"] != overall:
+            raise ContractError("TargetPack Host overall gate is inconsistent")
+        if document["status"] != ("passed" if overall else "failed"):
+            raise ContractError("TargetPack Host status is inconsistent")
     elif kind == "layer_precision_search":
         reference = document["reference"]
         sources = document["source_uniform_metrics"]
