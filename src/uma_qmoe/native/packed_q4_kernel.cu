@@ -30,6 +30,35 @@ constexpr int kReductionTile = 64;
 constexpr int kVectorOutputTile = 32;
 constexpr int kOutputsPerThread = kVectorOutputTile / kOutputTile;
 
+// Map a compact route-tile id to one expert-local tile.  The host launches an
+// upper bound of ceil(total_routes / tile) + experts - 1 blocks; surplus blocks
+// exit.  This avoids the old experts * ceil(tokens / tile) rectangular grid,
+// whose empty blocks dominated the frozen 128-token RouteTrace.
+__device__ __forceinline__ bool resolve_compact_route_tile(
+    const std::int64_t* __restrict__ expert_offsets,
+    std::int64_t compact_tile,
+    std::int64_t* expert,
+    std::int64_t* route_base) {
+  std::int64_t tile_offset = 0;
+#pragma unroll
+  for (std::int64_t candidate = 0; candidate < kExpertCount; ++candidate) {
+    const std::int64_t count =
+        expert_offsets[candidate + 1] - expert_offsets[candidate];
+    const std::int64_t tile_count =
+        (count + kRouteTile - 1) / kRouteTile;
+    if (compact_tile < tile_offset + tile_count) {
+      *expert = candidate;
+      *route_base = expert_offsets[candidate] +
+                    (compact_tile - tile_offset) * kRouteTile;
+      return true;
+    }
+    tile_offset += tile_count;
+  }
+  *expert = -1;
+  *route_base = -1;
+  return false;
+}
+
 __device__ __forceinline__ int unpack_low(const std::uint8_t value) {
   const int nibble = value & 0x0f;
   return nibble >= 8 ? nibble - 16 : nibble;
@@ -502,10 +531,16 @@ __global__ void packed_q4_gate_up_vectorized_kernel(
   const int local_output = threadIdx.x;
   const int local_route = threadIdx.y;
   const int thread = local_route * kOutputTile + local_output;
-  const std::int64_t expert = blockIdx.y;
-  const std::int64_t route_base =
-      expert_offsets[expert] + blockIdx.z * kRouteTile;
-  if (route_base >= expert_offsets[expert + 1]) return;
+  __shared__ std::int64_t resolved_expert;
+  __shared__ std::int64_t resolved_route_base;
+  if (thread == 0) {
+    resolve_compact_route_tile(
+        expert_offsets, blockIdx.y, &resolved_expert, &resolved_route_base);
+  }
+  __syncthreads();
+  if (resolved_expert < 0) return;
+  const std::int64_t expert = resolved_expert;
+  const std::int64_t route_base = resolved_route_base;
   const std::int64_t route_rank = route_base + local_route;
   const std::int64_t route =
       route_rank < expert_offsets[expert + 1] ? route_order[route_rank] : -1;
@@ -612,10 +647,16 @@ __global__ void packed_q4_down_vectorized_kernel(
   const int local_output = threadIdx.x;
   const int local_route = threadIdx.y;
   const int thread = local_route * kOutputTile + local_output;
-  const std::int64_t expert = blockIdx.y;
-  const std::int64_t route_base =
-      expert_offsets[expert] + blockIdx.z * kRouteTile;
-  if (route_base >= expert_offsets[expert + 1]) return;
+  __shared__ std::int64_t resolved_expert;
+  __shared__ std::int64_t resolved_route_base;
+  if (thread == 0) {
+    resolve_compact_route_tile(
+        expert_offsets, blockIdx.y, &resolved_expert, &resolved_route_base);
+  }
+  __syncthreads();
+  if (resolved_expert < 0) return;
+  const std::int64_t expert = resolved_expert;
+  const std::int64_t route_base = resolved_route_base;
   const std::int64_t route_rank = route_base + local_route;
   const std::int64_t route =
       route_rank < expert_offsets[expert + 1] ? route_order[route_rank] : -1;
@@ -824,10 +865,16 @@ __global__ void packed_q8_gate_up_vectorized_kernel(
   const int local_output = threadIdx.x;
   const int local_route = threadIdx.y;
   const int thread = local_route * kOutputTile + local_output;
-  const std::int64_t expert = blockIdx.y;
-  const std::int64_t route_base =
-      expert_offsets[expert] + blockIdx.z * kRouteTile;
-  if (route_base >= expert_offsets[expert + 1]) return;
+  __shared__ std::int64_t resolved_expert;
+  __shared__ std::int64_t resolved_route_base;
+  if (thread == 0) {
+    resolve_compact_route_tile(
+        expert_offsets, blockIdx.y, &resolved_expert, &resolved_route_base);
+  }
+  __syncthreads();
+  if (resolved_expert < 0) return;
+  const std::int64_t expert = resolved_expert;
+  const std::int64_t route_base = resolved_route_base;
   const std::int64_t route_rank = route_base + local_route;
   const std::int64_t route =
       route_rank < expert_offsets[expert + 1] ? route_order[route_rank] : -1;
@@ -925,10 +972,16 @@ __global__ void packed_q8_down_vectorized_kernel(
   const int local_output = threadIdx.x;
   const int local_route = threadIdx.y;
   const int thread = local_route * kOutputTile + local_output;
-  const std::int64_t expert = blockIdx.y;
-  const std::int64_t route_base =
-      expert_offsets[expert] + blockIdx.z * kRouteTile;
-  if (route_base >= expert_offsets[expert + 1]) return;
+  __shared__ std::int64_t resolved_expert;
+  __shared__ std::int64_t resolved_route_base;
+  if (thread == 0) {
+    resolve_compact_route_tile(
+        expert_offsets, blockIdx.y, &resolved_expert, &resolved_route_base);
+  }
+  __syncthreads();
+  if (resolved_expert < 0) return;
+  const std::int64_t expert = resolved_expert;
+  const std::int64_t route_base = resolved_route_base;
   const std::int64_t route_rank = route_base + local_route;
   const std::int64_t route =
       route_rank < expert_offsets[expert + 1] ? route_order[route_rank] : -1;
@@ -1439,6 +1492,8 @@ torch::Tensor uma_qmoe_q4_moe_prefill_cuda(
 
   const unsigned int route_tiles =
       static_cast<unsigned int>((rows + kRouteTile - 1) / kRouteTile);
+  const unsigned int compact_route_tiles = static_cast<unsigned int>(
+      (route_count + kRouteTile - 1) / kRouteTile + kExpertCount - 1);
 #if defined(__HIP_PLATFORM_AMD__) && defined(UMA_QMOE_USE_WMMA)
   const dim3 gate_up_grid(
       (kIntermediateSize + kOutputTile - 1) / kOutputTile,
@@ -1459,8 +1514,8 @@ torch::Tensor uma_qmoe_q4_moe_prefill_cuda(
   const dim3 tiled_block(kOutputTile, kRouteTile, 1);
   const dim3 gate_up_grid(
       (kIntermediateSize + kVectorOutputTile - 1) / kVectorOutputTile,
-      kExpertCount,
-      route_tiles);
+      compact_route_tiles,
+      1);
   packed_q4_gate_up_vectorized_kernel<<<
       gate_up_grid, tiled_block, 0, stream.stream()>>>(
       hidden.data_ptr<c10::BFloat16>(),
@@ -1492,8 +1547,8 @@ torch::Tensor uma_qmoe_q4_moe_prefill_cuda(
 #else
   const dim3 down_grid(
       (kHiddenSize + kVectorOutputTile - 1) / kVectorOutputTile,
-      kExpertCount,
-      route_tiles);
+      compact_route_tiles,
+      1);
   packed_q4_down_vectorized_kernel<<<down_grid, tiled_block, 0, stream.stream()>>>(
       intermediate.data_ptr<c10::BFloat16>(),
       routing_weights.data_ptr<c10::BFloat16>(),
@@ -1591,13 +1646,13 @@ torch::Tensor uma_qmoe_q8_moe_prefill_cuda(
   auto output =
       torch::empty({rows, kHiddenSize}, hidden.options().dtype(torch::kBFloat16));
 
-  const unsigned int route_tiles =
-      static_cast<unsigned int>((rows + kRouteTile - 1) / kRouteTile);
+  const unsigned int compact_route_tiles = static_cast<unsigned int>(
+      (route_count + kRouteTile - 1) / kRouteTile + kExpertCount - 1);
   const dim3 tiled_block(kOutputTile, kRouteTile, 1);
   const dim3 gate_up_grid(
       (kIntermediateSize + kVectorOutputTile - 1) / kVectorOutputTile,
-      kExpertCount,
-      route_tiles);
+      compact_route_tiles,
+      1);
   packed_q8_gate_up_vectorized_kernel<<<
       gate_up_grid, tiled_block, 0, stream.stream()>>>(
       hidden.data_ptr<c10::BFloat16>(),
@@ -1613,8 +1668,8 @@ torch::Tensor uma_qmoe_q8_moe_prefill_cuda(
 
   const dim3 down_grid(
       (kHiddenSize + kVectorOutputTile - 1) / kVectorOutputTile,
-      kExpertCount,
-      route_tiles);
+      compact_route_tiles,
+      1);
   packed_q8_down_vectorized_kernel<<<
       down_grid, tiled_block, 0, stream.stream()>>>(
       intermediate.data_ptr<c10::BFloat16>(),
