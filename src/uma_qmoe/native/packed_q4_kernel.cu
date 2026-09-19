@@ -25,8 +25,8 @@ constexpr int kIntermediateSize = 1024;
 constexpr int kExpertCount = 64;
 constexpr int kTopK = 8;
 constexpr int kRouteTile = 16;
-constexpr int kOutputTile = 16;
-constexpr int kReductionTile = 64;
+constexpr int kOutputTile = 4;
+constexpr int kReductionTile = 32;
 constexpr int kVectorOutputTile = 32;
 constexpr int kOutputsPerThread = kVectorOutputTile / kOutputTile;
 
