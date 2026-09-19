@@ -204,12 +204,21 @@ def _streaming_reference(
         torch.float32 if hidden_states.device.type == "cpu" else output_dtype
     )
     output = torch.zeros_like(flattened, dtype=compute_dtype)
-    unique_experts = torch.unique(expert_indices).detach().cpu().tolist()
-    for expert_index in unique_experts:
-        locations = torch.nonzero(expert_indices == expert_index, as_tuple=False)
-        rows = locations[:, 0]
-        slots = locations[:, 1]
-        prefix = f"model.layers.{layer_index}.mlp.experts.{expert_index}"
+    # Preserve the fixed Transformers OLMoE execution order exactly.  In
+    # particular, ``OlmoeExperts`` traverses the one-hot mask as
+    # [expert, top-k slot, token], not as [token, top-k slot].  Although both
+    # schedules are algebraically equivalent, changing the GEMM row order can
+    # select a different device kernel and perturb BF16 reductions enough to
+    # alter later Top-K routing decisions.
+    with torch.no_grad():
+        expert_mask = torch.nn.functional.one_hot(expert_indices, num_classes=64)
+        expert_mask = expert_mask.permute(2, 1, 0)
+        expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
+    for expert_entry in expert_hit:
+        expert_index = expert_entry[0]
+        slots, rows = torch.where(expert_mask[expert_index])
+        expert_number = int(expert_index.item())
+        prefix = f"model.layers.{layer_index}.mlp.experts.{expert_number}"
         if isinstance(reader, TargetPackReader):
             gate_array = decode_target_tensor(reader.tensor(f"{prefix}.gate_proj.weight"))
             up_array = decode_target_tensor(reader.tensor(f"{prefix}.up_proj.weight"))
