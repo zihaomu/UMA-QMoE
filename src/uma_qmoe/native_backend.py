@@ -660,20 +660,6 @@ class MixedTargetNativeBackend:
         return existing
 
     @staticmethod
-    def _routes(expert_indices: Any, torch: Any) -> tuple[Any, list[int]]:
-        with torch.no_grad():
-            expert_mask = torch.nn.functional.one_hot(
-                expert_indices, num_classes=64
-            ).permute(2, 1, 0)
-            expert_numbers = (
-                torch.greater(expert_mask.sum(dim=(-1, -2)), 0)
-                .nonzero()
-                .flatten()
-                .tolist()
-            )
-        return expert_mask, expert_numbers
-
-    @staticmethod
     def _bf16_forward(
         hidden_states: Any,
         expert_indices: Any,
@@ -681,32 +667,40 @@ class MixedTargetNativeBackend:
         layer: _DeviceBF16Layer,
     ) -> Any:
         import torch
-        import torch.nn.functional as functional
-
         flattened = hidden_states.reshape(-1, hidden_states.shape[-1])
-        routed_output = torch.zeros(
-            (flattened.shape[0], 8, flattened.shape[1]),
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
-        expert_mask, expert_numbers = MixedTargetNativeBackend._routes(
-            expert_indices, torch
-        )
-        for expert_number in expert_numbers:
-            slots, rows = torch.where(expert_mask[expert_number])
-            selected = flattened.index_select(0, rows)
-            gate, up = functional.linear(
-                selected, layer.gate_up[expert_number]
-            ).chunk(2, dim=-1)
-            intermediate = functional.silu(gate)
-            intermediate.mul_(up)
-            expert_output = functional.linear(
-                intermediate, layer.down[expert_number]
+        if not hasattr(torch, "_grouped_mm"):
+            raise RuntimeError(
+                "mixed BF16 performance path requires torch._grouped_mm"
             )
-            routed_output[rows, slots] = (
-                expert_output * routing_weights[rows, slots].unsqueeze(-1)
-            )
-        return routed_output.sum(dim=1).reshape(hidden_states.shape)
+        top_k = expert_indices.shape[1]
+        sample_weights = routing_weights.reshape(-1)
+        expert_ids = expert_indices.reshape(-1)
+        expert_ids_grouped, permutation = torch.sort(expert_ids)
+        selected_hidden = flattened[permutation // top_k]
+        grouped_weights = sample_weights[permutation]
+        tokens_per_expert = torch.histc(
+            expert_ids_grouped.int(), bins=64, min=0, max=63
+        )
+        offsets = torch.cumsum(tokens_per_expert, dim=0, dtype=torch.int32)
+
+        gate_up = torch._grouped_mm(
+            selected_hidden, layer.gate_up.transpose(-2, -1), offs=offsets
+        )
+        gate, up = gate_up.chunk(2, dim=-1)
+        intermediate = torch.nn.functional.silu(gate)
+        intermediate.mul_(up)
+        projected = torch._grouped_mm(
+            intermediate, layer.down.transpose(-2, -1), offs=offsets
+        )
+        projected.mul_(grouped_weights.unsqueeze(-1))
+        inverse_permutation = torch.empty_like(permutation)
+        inverse_permutation[permutation] = torch.arange(
+            permutation.numel(), device=hidden_states.device
+        )
+        ordered = projected[inverse_permutation]
+        return ordered.view(flattened.shape[0], top_k, 2048).sum(dim=1).reshape(
+            hidden_states.shape
+        )
 
     @staticmethod
     def _sorted_routes(
