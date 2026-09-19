@@ -362,6 +362,9 @@ def validate_document(
             "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3": (
                 "decode-two-launch-prefill-expert-sorted-three-stage"
             ),
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-tiled-v4": (
+                "decode-two-launch-prefill-expert-tiled-three-stage"
+            ),
         }
         expected_strategy = strategy_by_abi.get(kernel["abi"])
         if expected_strategy is not None and (
@@ -404,7 +407,10 @@ def validate_document(
         ):
             raise ContractError("Packed Q4 timing summary does not match samples")
         prefill_expected: dict[str, bool] = {}
-        if kernel["abi"].endswith("route-specialized-v3"):
+        if kernel["abi"] in {
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-specialized-v3",
+            "q4-group128-packed-u8-fp32-scale-bf16-in-bf16-out-route-tiled-v4",
+        }:
             prefill = correctness.get("prefill_moe_forward")
             prefill_samples = performance.get("prefill_samples_milliseconds")
             if (
