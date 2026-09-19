@@ -203,7 +203,17 @@ def _streaming_reference(
     compute_dtype = (
         torch.float32 if hidden_states.device.type == "cpu" else output_dtype
     )
-    output = torch.zeros_like(flattened, dtype=compute_dtype)
+    # Current Transformers OLMoE restores the original [token, top-k] route
+    # order and reduces the eight expert contributions with reshape+sum.  In
+    # BF16 that reduction uses a stable FP32 accumulator; the historical eager
+    # implementation's BF16 ``index_add_`` is numerically different enough to
+    # flip later router decisions.  Keep one slot per route here and perform
+    # the same final reduction after all experts have produced their rows.
+    routed_output = torch.zeros(
+        (flattened.shape[0], 8, flattened.shape[1]),
+        dtype=compute_dtype,
+        device=hidden_states.device,
+    )
     # Preserve the fixed Transformers OLMoE execution order exactly.  In
     # particular, ``OlmoeExperts`` traverses the one-hot mask as
     # [expert, top-k slot, token], not as [token, top-k slot].  Although both
@@ -237,8 +247,9 @@ def _streaming_reference(
         intermediate = _fused_gate_up(selected, gate_up, functional)
         expert_output = functional.linear(intermediate, down)
         weights = routing_weights[rows, slots].to(compute_dtype).unsqueeze(-1)
-        output.index_add_(0, rows, expert_output * weights)
+        routed_output[rows, slots] = expert_output * weights
         del gate_up, down, gate_array, up_array, down_array
+    output = routed_output.sum(dim=1)
     return output.to(output_dtype).reshape(hidden_states.shape)
 
 
