@@ -56,6 +56,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--reverse-layer-evidence", type=Path, required=True)
+    parser.add_argument(
+        "--allow-cross-target-policy-source",
+        action="store_true",
+        help=(
+            "explicitly allow a validated policy-derivation evidence file from the "
+            "other target; weights are still rebuilt and quality-gated locally"
+        ),
+    )
     parser.add_argument("--prompt-fixture", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--target-pack", type=Path)
@@ -266,14 +274,25 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     source = json.loads(args.reverse_layer_evidence.read_text(encoding="utf-8"))
     validate_document(source)
-    source_compatible = (
+    source_identity_compatible = (
         source.get("kind") == "reverse_layer_quantization_search"
-        and source.get("target_id") == args.target_id
         and source.get("status") == "passed"
         and source.get("model", {}).get("model_id") == MODEL_ID
         and source.get("model", {}).get("model_revision") == MODEL_REVISION
     )
+    source_target_id = source.get("target_id")
+    cross_target_reproduction = source_target_id != args.target_id
+    source_target_compatible = (
+        not cross_target_reproduction or args.allow_cross_target_policy_source
+    )
+    source_compatible = source_identity_compatible and source_target_compatible
     if not source_compatible:
+        if source_identity_compatible and cross_target_reproduction:
+            raise RuntimeError(
+                "reverse-layer evidence target differs from --target-id; pass "
+                "--allow-cross-target-policy-source only for an explicit local "
+                "reproduction of the frozen policy"
+            )
         raise RuntimeError("reverse-layer evidence identity is incompatible")
     samples = _load_samples(args.prompt_fixture)
     split = len(samples) // 2
@@ -402,6 +421,7 @@ def main() -> int:
     )
     gates = {
         "source_evidence_compatible": source_compatible,
+        "source_target_compatible": source_target_compatible,
         "dataset_identity": dataset_identity,
         "dataset_split_disjoint": not bool(set(calibration_ids) & set(evaluation_ids)),
         "reference_finite": bool(reference["finite"]),
@@ -430,6 +450,8 @@ def main() -> int:
                 "file_sha256": _sha256_file(args.reverse_layer_evidence),
                 "semantic_sha256": canonical_sha256(source),
             },
+            "source_evidence_target_id": source_target_id,
+            "cross_target_reproduction": cross_target_reproduction,
             "prompt_fixture": {
                 "file_sha256": _sha256_file(args.prompt_fixture),
                 "semantic_sha256": _fixture_semantic_sha256(samples),

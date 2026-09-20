@@ -25,6 +25,8 @@
       "properties": {
         "id": { "enum": ["layer15-awq-q4-q8-bf16-mixed-v1", "layer15-awq-q4-q8-bf16-mixed-v2"] },
         "source_reverse_layer_evidence": { "$ref": "#/$defs/identity" },
+        "source_evidence_target_id": { "enum": ["halo3", "spark1"] },
+        "cross_target_reproduction": { "type": "boolean" },
         "prompt_fixture": { "$ref": "#/$defs/identity" },
         "calibration_only": { "const": false },
         "performance_evidence": { "const": false },
@@ -35,6 +37,10 @@
           "items": false
         },
         "q8_group_size": { "const": 128 }
+      },
+      "dependentRequired": {
+        "source_evidence_target_id": ["cross_target_reproduction"],
+        "cross_target_reproduction": ["source_evidence_target_id"]
       }
     },
     "dataset": {
@@ -89,6 +95,7 @@
       "required": ["source_evidence_compatible", "dataset_identity", "dataset_split_disjoint", "reference_finite", "q8_base_reproduced", "q8_base_quality_passed", "policy_finite", "policy_quality_passed", "storage_accounting", "quality_gate_unchanged", "overall_passed"],
       "properties": {
         "source_evidence_compatible": { "type": "boolean" },
+        "source_target_compatible": { "type": "boolean" },
         "dataset_identity": { "type": "boolean" },
         "dataset_split_disjoint": { "type": "boolean" },
         "reference_finite": { "type": "boolean" },
