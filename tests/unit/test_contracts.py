@@ -127,7 +127,8 @@ def test_qwen_draft_contract_binds_uploaded_bf16_model_manifest() -> None:
 
     assert contract["schema_version"] == 2
     assert contract["status"] == "draft"
-    assert [target["id"] for target in contract["targets"]] == ["halo4", "spark1"]
+    assert [target["id"] for target in contract["targets"]] == ["spark1"]
+    assert contract["resource_gates"]["safe_uma_budget"]["status"] == "frozen"
     assert contract["oracle"]["weight_source"] == {
         "kind": "model_manifest",
         "path": "models/manifests/qwen1_5_moe_a2_7b.yaml",
