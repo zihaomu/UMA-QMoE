@@ -1,4 +1,4 @@
-"""Build, validate, hash, and replay the immutable OLMoE RouteTrace v1."""
+"""Build, validate, hash, and replay fixed-model RouteTrace evidence."""
 
 from __future__ import annotations
 
@@ -12,13 +12,16 @@ import struct
 from typing import Any
 
 from .contracts import ContractError, canonical_sha256, validate_document
+from .fixed_models import OLMOE, FixedModelSpec, fixed_model_spec
 
 
-MODEL_ID = "allenai/OLMoE-1B-7B-0125"
-MODEL_REVISION = "9b0c1aa87e34a20052389dce1f0cf01da783f654"
-NUM_LAYERS = 16
-NUM_EXPERTS = 64
-TOP_K = 8
+# Backward-compatible constants for callers that still name the canonical
+# OLMoE v1 trace dimensions directly.
+MODEL_ID = OLMOE.model_id
+MODEL_REVISION = OLMOE.model_revision
+NUM_LAYERS = OLMOE.num_layers
+NUM_EXPERTS = OLMOE.num_experts
+TOP_K = OLMOE.top_k
 
 
 def _utc_now() -> str:
@@ -76,9 +79,11 @@ def _finite_weight(value: Any, field: str) -> float:
     return float(value)
 
 
-def _payload_hash(layers: list[dict[str, Any]]) -> str:
+def _payload_hash(
+    layers: list[dict[str, Any]], *, schema_version: int
+) -> str:
     digest = hashlib.sha256()
-    digest.update(b"UMA-QMoE.RouteTrace.v1\0")
+    digest.update(f"UMA-QMoE.RouteTrace.v{schema_version}\0".encode())
     for layer in layers:
         digest.update(struct.pack("<H", layer["layer_index"]))
         for event in layer["events"]:
@@ -95,19 +100,20 @@ def _nearest_rank(values: list[int], quantile: float) -> int:
     return ordered[max(0, math.ceil(quantile * len(ordered)) - 1)]
 
 
-def _statistics(counts: list[int]) -> dict[str, Any]:
-    ranked_hot = sorted(range(NUM_EXPERTS), key=lambda expert: (-counts[expert], expert))
-    nonempty = [expert for expert in range(NUM_EXPERTS) if counts[expert] > 0]
+def _statistics(counts: list[int], *, top_k: int) -> dict[str, Any]:
+    num_experts = len(counts)
+    ranked_hot = sorted(range(num_experts), key=lambda expert: (-counts[expert], expert))
+    nonempty = [expert for expert in range(num_experts) if counts[expert] > 0]
     ranked_tail = sorted(nonempty, key=lambda expert: (counts[expert], expert))
-    empty = [expert for expert in range(NUM_EXPERTS) if counts[expert] == 0]
+    empty = [expert for expert in range(num_experts) if counts[expert] == 0]
     return {
         "tokens_per_expert": counts,
-        "hot_experts": ranked_hot[:TOP_K],
-        "long_tail_experts": ranked_tail[:TOP_K],
+        "hot_experts": ranked_hot[:top_k],
+        "long_tail_experts": ranked_tail[:top_k],
         "empty_experts": empty,
         "minimum_tokens": min(counts),
         "maximum_tokens": max(counts),
-        "mean_tokens": sum(counts) / NUM_EXPERTS,
+        "mean_tokens": sum(counts) / num_experts,
         "p95_tokens": _nearest_rank(counts, 0.95),
     }
 
@@ -151,9 +157,15 @@ def _normalize_events(raw_events: Any) -> list[dict[str, Any]]:
     return events
 
 
-def _normalize_layers(raw_layers: Any, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if not isinstance(raw_layers, list) or len(raw_layers) != NUM_LAYERS:
-        raise ContractError(f"RouteTrace capture must contain exactly {NUM_LAYERS} layers")
+def _normalize_layers(
+    raw_layers: Any,
+    events: list[dict[str, Any]],
+    spec: FixedModelSpec,
+) -> list[dict[str, Any]]:
+    if not isinstance(raw_layers, list) or len(raw_layers) != spec.num_layers:
+        raise ContractError(
+            f"RouteTrace capture must contain exactly {spec.num_layers} layers"
+        )
     layers: list[dict[str, Any]] = []
     for layer_index, raw_layer in enumerate(raw_layers):
         if not isinstance(raw_layer, dict) or raw_layer.get("layer_index") != layer_index:
@@ -161,7 +173,7 @@ def _normalize_layers(raw_layers: Any, events: list[dict[str, Any]]) -> list[dic
         raw_layer_events = raw_layer.get("events")
         if not isinstance(raw_layer_events, list) or len(raw_layer_events) != len(events):
             raise ContractError("each RouteTrace layer must cover every event")
-        counts = [0] * NUM_EXPERTS
+        counts = [0] * spec.num_experts
         normalized_layer_events: list[dict[str, Any]] = []
         total_tokens = 0
         for event, raw_event in zip(events, raw_layer_events, strict=True):
@@ -172,7 +184,7 @@ def _normalize_layers(raw_layers: Any, events: list[dict[str, Any]]) -> list[dic
             token_count = event["token_count"]
             experts = raw_event.get("expert_indices")
             weights = raw_event.get("routing_weights")
-            expected_values = token_count * TOP_K
+            expected_values = token_count * spec.top_k
             if (
                 not isinstance(experts, list)
                 or not isinstance(weights, list)
@@ -183,14 +195,14 @@ def _normalize_layers(raw_layers: Any, events: list[dict[str, Any]]) -> list[dic
             normalized_experts = [
                 _integer(value, "expert index") for value in experts
             ]
-            if any(value >= NUM_EXPERTS for value in normalized_experts):
+            if any(value >= spec.num_experts for value in normalized_experts):
                 raise ContractError("RouteTrace expert index exceeds model expert count")
             normalized_weights = [
                 _finite_weight(value, "routing weight") for value in weights
             ]
-            for offset in range(0, expected_values, TOP_K):
-                row = normalized_experts[offset : offset + TOP_K]
-                if len(set(row)) != TOP_K:
+            for offset in range(0, expected_values, spec.top_k):
+                row = normalized_experts[offset : offset + spec.top_k]
+                if len(set(row)) != spec.top_k:
                     raise ContractError("RouteTrace Top-K row contains duplicate experts")
                 for expert in row:
                     counts[expert] += 1
@@ -206,10 +218,10 @@ def _normalize_layers(raw_layers: Any, events: list[dict[str, Any]]) -> list[dic
         layers.append(
             {
                 "layer_index": layer_index,
-                "top_k": TOP_K,
+                "top_k": spec.top_k,
                 "token_count": total_tokens,
                 "events": normalized_layer_events,
-                "expert_statistics": _statistics(counts),
+                "expert_statistics": _statistics(counts, top_k=spec.top_k),
             }
         )
     return layers
@@ -220,17 +232,16 @@ def build_route_trace(capture_path: str | Path, *, trace_id: str) -> dict[str, A
 
     source = Path(capture_path)
     raw = _load(source)
-    if raw.get("model_id") != MODEL_ID or raw.get("model_revision") != MODEL_REVISION:
-        raise ContractError("RouteTrace capture model identity does not match OLMoE")
+    spec = fixed_model_spec(raw.get("model_id"), raw.get("model_revision"))
     architecture = raw.get("architecture")
     if architecture != {
-        "num_layers": NUM_LAYERS,
-        "num_experts": NUM_EXPERTS,
-        "top_k": TOP_K,
+        "num_layers": spec.num_layers,
+        "num_experts": spec.num_experts,
+        "top_k": spec.top_k,
     }:
-        raise ContractError("RouteTrace capture architecture does not match OLMoE")
+        raise ContractError("RouteTrace capture architecture does not match fixed model")
     events = _normalize_events(raw.get("events"))
-    layers = _normalize_layers(raw.get("layers"), events)
+    layers = _normalize_layers(raw.get("layers"), events, spec)
     workload = raw.get("workload")
     fixture = raw.get("fixture")
     capture = raw.get("capture")
@@ -247,15 +258,15 @@ def build_route_trace(capture_path: str | Path, *, trace_id: str) -> dict[str, A
 
     tokens_per_layer = sum(event["token_count"] for event in events)
     document = {
-        "schema_version": 1,
+        "schema_version": spec.trace_schema_version,
         "kind": "route_trace",
         "trace_id": trace_id,
         "status": "frozen",
         "captured_at": raw.get("captured_at", _utc_now()),
         "source_capture_sha256": _sha256(source),
         "model": {
-            "model_id": MODEL_ID,
-            "model_revision": MODEL_REVISION,
+            "model_id": spec.model_id,
+            "model_revision": spec.model_revision,
             **architecture,
         },
         "fixture": {
@@ -282,10 +293,10 @@ def build_route_trace(capture_path: str | Path, *, trace_id: str) -> dict[str, A
         "layers": layers,
         "summary": {
             "event_count": len(events),
-            "layer_count": NUM_LAYERS,
+            "layer_count": spec.num_layers,
             "tokens_per_layer": tokens_per_layer,
-            "routed_token_decisions": tokens_per_layer * NUM_LAYERS,
-            "expert_assignments": tokens_per_layer * NUM_LAYERS * TOP_K,
+            "routed_token_decisions": tokens_per_layer * spec.num_layers,
+            "expert_assignments": tokens_per_layer * spec.num_layers * spec.top_k,
             "batch_shapes": [
                 {
                     "phase": "prefill",
@@ -301,7 +312,9 @@ def build_route_trace(capture_path: str | Path, *, trace_id: str) -> dict[str, A
                 },
             ],
         },
-        "route_payload_sha256": _payload_hash(layers),
+        "route_payload_sha256": _payload_hash(
+            layers, schema_version=spec.trace_schema_version
+        ),
     }
     validate_document(document)
     return document
@@ -311,6 +324,18 @@ def validate_route_trace_document(document: Mapping[str, Any]) -> None:
     """Recompute every derived statistic and the binary route payload hash."""
 
     events = _normalize_events(document["events"])
+    model = document["model"]
+    spec = fixed_model_spec(model["model_id"], model["model_revision"])
+    if document["schema_version"] != spec.trace_schema_version:
+        raise ContractError("RouteTrace schema version does not match fixed model")
+    if model != {
+        "model_id": spec.model_id,
+        "model_revision": spec.model_revision,
+        "num_layers": spec.num_layers,
+        "num_experts": spec.num_experts,
+        "top_k": spec.top_k,
+    }:
+        raise ContractError("RouteTrace model architecture is inconsistent")
     raw_layers = [
         {
             "layer_index": layer["layer_index"],
@@ -318,21 +343,23 @@ def validate_route_trace_document(document: Mapping[str, Any]) -> None:
         }
         for layer in document["layers"]
     ]
-    layers = _normalize_layers(raw_layers, events)
+    layers = _normalize_layers(raw_layers, events, spec)
     for observed, expected in zip(document["layers"], layers, strict=True):
         if observed != expected:
             raise ContractError(
                 f"RouteTrace layer {observed['layer_index']} derived fields are inconsistent"
             )
-    if document["route_payload_sha256"] != _payload_hash(layers):
+    if document["route_payload_sha256"] != _payload_hash(
+        layers, schema_version=spec.trace_schema_version
+    ):
         raise ContractError("RouteTrace route payload SHA-256 is inconsistent")
     tokens_per_layer = sum(event["token_count"] for event in events)
     expected_summary = {
         "event_count": len(events),
-        "layer_count": NUM_LAYERS,
+        "layer_count": spec.num_layers,
         "tokens_per_layer": tokens_per_layer,
-        "routed_token_decisions": tokens_per_layer * NUM_LAYERS,
-        "expert_assignments": tokens_per_layer * NUM_LAYERS * TOP_K,
+        "routed_token_decisions": tokens_per_layer * spec.num_layers,
+        "expert_assignments": tokens_per_layer * spec.num_layers * spec.top_k,
         "batch_shapes": [
             {
                 "phase": "prefill",
@@ -356,10 +383,12 @@ def iter_replay_events(document: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
     """Yield immutable event-major/layer-major route tensors for kernel replay."""
 
     validate_document(document)
+    model = document["model"]
+    spec = fixed_model_spec(model["model_id"], model["model_revision"])
     layer_by_index = {layer["layer_index"]: layer for layer in document["layers"]}
     for event in document["events"]:
         event_index = event["event_index"]
-        for layer_index in range(NUM_LAYERS):
+        for layer_index in range(spec.num_layers):
             layer_event = layer_by_index[layer_index]["events"][event_index]
             yield {
                 "event_index": event_index,
@@ -369,7 +398,7 @@ def iter_replay_events(document: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
                 "batch_size": event["batch_size"],
                 "tokens_per_sequence": event["tokens_per_sequence"],
                 "token_count": event["token_count"],
-                "top_k": TOP_K,
+                "top_k": spec.top_k,
                 "expert_indices": tuple(layer_event["expert_indices"]),
                 "routing_weights": tuple(layer_event["routing_weights"]),
             }
@@ -387,7 +416,7 @@ def build_replay_summary(document: Mapping[str, Any]) -> dict[str, Any]:
         "route_payload_sha256": document["route_payload_sha256"],
         "event_layer_records": len(records),
         "event_count": document["summary"]["event_count"],
-        "layer_count": NUM_LAYERS,
+        "layer_count": document["model"]["num_layers"],
         "tokens_per_layer": document["summary"]["tokens_per_layer"],
         "expert_assignments": document["summary"]["expert_assignments"],
     }

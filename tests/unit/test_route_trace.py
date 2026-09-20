@@ -86,6 +86,34 @@ def _raw_capture() -> dict:
     }
 
 
+def _raw_qwen_capture() -> dict:
+    capture = _raw_capture()
+    capture["model_id"] = "Qwen/Qwen1.5-MoE-A2.7B"
+    capture["model_revision"] = "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9"
+    capture["architecture"] = {"num_layers": 24, "num_experts": 60, "top_k": 4}
+    events = capture["events"]
+    layers = []
+    for layer_index in range(24):
+        layer_events = []
+        for event in events:
+            token_count = event["batch_size"] * event["tokens_per_sequence"]
+            experts = [
+                (expert + layer_index) % 60
+                for _ in range(token_count)
+                for expert in range(4)
+            ]
+            layer_events.append(
+                {
+                    "event_index": event["event_index"],
+                    "expert_indices": experts,
+                    "routing_weights": [0.25] * len(experts),
+                }
+            )
+        layers.append({"layer_index": layer_index, "events": layer_events})
+    capture["layers"] = layers
+    return capture
+
+
 def test_route_trace_recomputes_statistics_hash_and_replay(tmp_path: Path) -> None:
     capture = tmp_path / "capture.json"
     capture.write_text(json.dumps(_raw_capture()), encoding="utf-8")
@@ -127,3 +155,32 @@ def test_route_trace_rejects_duplicate_top_k_expert(tmp_path: Path) -> None:
 
     with pytest.raises(ContractError, match="duplicate experts"):
         build_route_trace(capture, trace_id="olmoe_route_trace_test_v1")
+
+
+def test_qwen_route_trace_v2_recomputes_dynamic_shapes(tmp_path: Path) -> None:
+    capture = tmp_path / "qwen-capture.json"
+    capture.write_text(json.dumps(_raw_qwen_capture()), encoding="utf-8")
+
+    trace = build_route_trace(capture, trace_id="qwen1_5_moe_route_trace_test_v2")
+
+    assert trace["schema_version"] == 2
+    assert trace["summary"]["layer_count"] == 24
+    assert trace["summary"]["expert_assignments"] == 4 * 24 * 4
+    assert len(trace["layers"]) == 24
+    assert len(trace["layers"][0]["expert_statistics"]["tokens_per_expert"]) == 60
+    assert len(list(iter_replay_events(trace))) == 3 * 24
+    replay = build_replay_summary(trace)
+    assert replay["event_layer_records"] == 3 * 24
+    assert replay["layer_count"] == 24
+    validate_document(trace)
+    validate_document(replay)
+
+
+def test_qwen_route_trace_rejects_olmoe_shape_aliasing(tmp_path: Path) -> None:
+    raw = _raw_qwen_capture()
+    raw["architecture"]["top_k"] = 8
+    capture = tmp_path / "qwen-capture.json"
+    capture.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ContractError, match="architecture"):
+        build_route_trace(capture, trace_id="qwen1_5_moe_route_trace_test_v2")

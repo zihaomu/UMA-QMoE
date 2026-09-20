@@ -17,8 +17,8 @@
     "route_payload_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "event_layer_records": { "type": "integer", "minimum": 32 },
     "event_count": { "type": "integer", "minimum": 2 },
-    "layer_count": { "const": 16 },
+    "layer_count": { "enum": [16, 24] },
     "tokens_per_layer": { "type": "integer", "minimum": 2 },
-    "expert_assignments": { "type": "integer", "minimum": 256 }
+    "expert_assignments": { "type": "integer", "minimum": 192 }
   }
 }

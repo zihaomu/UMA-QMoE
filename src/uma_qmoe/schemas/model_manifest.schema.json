@@ -51,6 +51,7 @@
         "num_layers": { "type": "integer", "minimum": 1 },
         "hidden_size": { "type": "integer", "minimum": 1 },
         "expert_intermediate_size": { "type": "integer", "minimum": 1 },
+        "shared_expert_intermediate_size": { "type": "integer", "minimum": 1 },
         "num_experts": { "type": "integer", "minimum": 2 },
         "top_k": { "type": "integer", "minimum": 1 },
         "max_position_embeddings": { "type": "integer", "minimum": 1 },

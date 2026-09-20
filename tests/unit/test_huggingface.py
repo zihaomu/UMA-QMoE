@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from uma_qmoe.contracts import validate_document
+from uma_qmoe.huggingface import _parse_architecture
 from uma_qmoe.huggingface import HuggingFaceImportError, build_model_manifest_draft
 
 
@@ -163,6 +164,27 @@ def test_imports_pinned_olmoe_metadata_without_downloading_weights() -> None:
     assert not any(
         url.split("?", maxsplit=1)[0].endswith(".safetensors") for url in fetcher.urls
     )
+
+
+def test_qwen_moe_uses_routed_expert_width_not_shared_expert_width() -> None:
+    architecture = _parse_architecture(
+        {
+            "architectures": ["Qwen2MoeForCausalLM"],
+            "model_type": "qwen2_moe",
+            "num_hidden_layers": 24,
+            "hidden_size": 2048,
+            "intermediate_size": 5632,
+            "moe_intermediate_size": 1408,
+            "shared_expert_intermediate_size": 5632,
+            "num_experts": 60,
+            "num_experts_per_tok": 4,
+            "max_position_embeddings": 8192,
+            "norm_topk_prob": False,
+        }
+    )
+
+    assert architecture["expert_intermediate_size"] == 1408
+    assert architecture["shared_expert_intermediate_size"] == 5632
 
 
 @pytest.mark.parametrize("revision", ["main", "v1.0", "A" * 40, "0" * 39, "0" * 41])

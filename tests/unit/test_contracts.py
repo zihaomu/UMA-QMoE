@@ -72,7 +72,8 @@ def test_pinned_qwen_moe_manifest_matches_architecture_golden_values() -> None:
         "model_type": "qwen2_moe",
         "num_layers": 24,
         "hidden_size": 2048,
-        "expert_intermediate_size": 5632,
+        "expert_intermediate_size": 1408,
+        "shared_expert_intermediate_size": 5632,
         "num_experts": 60,
         "top_k": 4,
         "max_position_embeddings": 8192,
@@ -87,9 +88,9 @@ def test_pinned_qwen_moe_manifest_matches_architecture_golden_values() -> None:
     assert manifest["dtypes"]["observed_tensor_dtypes"] == ["BF16"]
     assert manifest["weights"]["tensor_inventory"] == {
         "path": "models/inventories/qwen1_5_moe_a2_7b_bf16.json",
-        "sha256": "9a3abfe176cd7a704b950573c4ce7d2967d11c36f8792881de33a2e8e7365be0",
+        "sha256": "24d6ea5f730c73376103cda89057230f4851c0df0b5e5b140d263f295c8b6f3d",
         "source_manifest_sha256": (
-            "b4098c447e381fa967707e46dd7e6fe2308ff292c00769fb81ac079b10681ee7"
+            "4177deb25880512317f919596e66107acb7b3d5ced49788c2f885ecb75553fdc"
         ),
     }
     assert manifest["dtypes"]["evidence_conflict"] is False
