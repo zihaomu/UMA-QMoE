@@ -6,7 +6,7 @@
 >
 > **公开分支：** `feat/m0-bootstrap`
 >
-> **本文档前序提交：** `11ed9f0ffcd409f7f1e2c09b6bf597ca71052440`
+> **本文档前序提交：** `f4dbc0dae97d5217d5fae32f0aec9b162cbf0486`
 >
 > **公开 PR：** <https://github.com/zihaomu/UMA-QMoE/pull/2>
 >
@@ -83,7 +83,7 @@ UMA-QMoE 面向统一内存设备上的 MoE 推理，目标是在固定质量约
 | 项目 | 当前状态 |
 |---|---|
 | 分支 | `feat/m0-bootstrap` |
-| 本文档前序提交 | `11ed9f0ffcd409f7f1e2c09b6bf597ca71052440` |
+| 本文档前序提交 | `f4dbc0dae97d5217d5fae32f0aec9b162cbf0486` |
 | PR | Draft PR #2，OPEN，merge state `CLEAN` |
 | 基线分支 | `main` |
 | 最新已验证 CI | GitHub Actions run `35497712792` |
@@ -92,7 +92,12 @@ UMA-QMoE 面向统一内存设备上的 MoE 推理，目标是在固定质量约
 | 其他门禁 | Ruff 0.12.11、依赖边界、compileall、全部公开 Contract/Manifest、package build |
 
 本次交接提交应只增加恢复文档和入口链接。提交后的 commit Hash 以包含本文档的实际 Git
-提交为准，不能在文档内写入自引用 Hash；`11ed9f0` 是它的确定前序基线。
+提交为准，不能在文档内写入自引用 Hash；`f4dbc0d` 是它的确定前序基线。
+
+2026-09-20 对 PR #2 的 51 个提交统一了 Git Author/Committer。重写前的完整历史由远端
+标签 `archive/pr2-pre-author-rewrite-20260920` 固定在 `a57c35c`。私有实验记录中的旧
+commit Hash 描述的是当时真实运行的代码身份，必须保持原值；需要恢复时通过该归档标签
+获取，不得批量替换为重写后的 Hash。
 
 ### 3.2 公开契约锚点
 
