@@ -1,0 +1,8 @@
+{"id":"general-001","category":"general_completion","prompt":"The capital of France is"}
+{"id":"general-002","category":"general_completion","prompt":"Water freezes at a temperature of"}
+{"id":"math-001","category":"math_completion","prompt":"If a train travels 60 kilometers in one hour, in two hours it travels"}
+{"id":"math-002","category":"math_completion","prompt":"The next number in the sequence 2, 4, 8, 16 is"}
+{"id":"code-001","category":"code_completion","prompt":"In Python, a list comprehension that squares the numbers from 0 to 4 is"}
+{"id":"code-002","category":"code_completion","prompt":"A function that returns the larger of two integers can be written as"}
+{"id":"reasoning-001","category":"reasoning_completion","prompt":"All robins are birds. If Alex is a robin, then Alex is"}
+{"id":"longform-001","category":"longform_completion","prompt":"A practical way to reduce memory bandwidth during neural network inference is"}

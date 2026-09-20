@@ -1,4 +1,4 @@
-"""Versioned, streaming numerical comparison contracts for the OLMoE Oracle.
+"""Versioned, streaming numerical comparison contracts for fixed-model Oracles.
 
 The comparison core deliberately does not load Transformers or a model.  It
 consumes small tensor-record streams captured by a reference implementation
@@ -20,12 +20,17 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from .contracts import ContractError
+from .fixed_models import OLMOE, FixedModelSpec, fixed_model_spec
 
-MODEL_ID = "allenai/OLMoE-1B-7B-0125"
-MODEL_TYPE = "olmoe"
-NUM_LAYERS = 16
-NUM_EXPERTS = 64
-TOP_K = 8
+
+# Backward-compatible constants for callers that still import the canonical
+# OLMoE Oracle dimensions directly.
+MODEL_ID = OLMOE.model_id
+MODEL_TYPE = OLMOE.model_type
+NUM_LAYERS = OLMOE.num_layers
+NUM_EXPERTS = OLMOE.num_experts
+TOP_K = OLMOE.top_k
 
 _NUMERIC_DTYPES = frozenset({"float16", "bfloat16", "float32", "float64"})
 _ROUTER_DTYPES = frozenset({"int16", "int32", "int64", "uint16", "uint32"})
@@ -100,31 +105,47 @@ def _reject_non_finite_numbers(value: Any, *, path: str = "$") -> None:
             _reject_non_finite_numbers(item, path=f"{path}[{index}]")
 
 
-def _validate_scope(scope: Mapping[str, Any]) -> None:
+def _validate_scope(scope: Mapping[str, Any], spec: FixedModelSpec) -> None:
     level = scope.get("level")
     if level not in _LEVELS:
         raise ReferenceOracleError(f"unsupported Oracle scope {level!r}")
     layer = scope.get("layer_index")
     expert = scope.get("expert_index")
     if level == "single_expert":
-        if not isinstance(layer, int) or isinstance(layer, bool) or not 0 <= layer < NUM_LAYERS:
-            raise ReferenceOracleError("single_expert requires layer_index in [0, 15]")
+        if (
+            not isinstance(layer, int)
+            or isinstance(layer, bool)
+            or not 0 <= layer < spec.num_layers
+        ):
+            raise ReferenceOracleError(
+                f"single_expert requires layer_index in [0, {spec.num_layers - 1}]"
+            )
         if (
             not isinstance(expert, int)
             or isinstance(expert, bool)
-            or not 0 <= expert < NUM_EXPERTS
+            or not 0 <= expert < spec.num_experts
         ):
-            raise ReferenceOracleError("single_expert requires expert_index in [0, 63]")
+            raise ReferenceOracleError(
+                f"single_expert requires expert_index in [0, {spec.num_experts - 1}]"
+            )
     elif level == "single_moe_layer":
-        if not isinstance(layer, int) or isinstance(layer, bool) or not 0 <= layer < NUM_LAYERS:
-            raise ReferenceOracleError("single_moe_layer requires layer_index in [0, 15]")
+        if (
+            not isinstance(layer, int)
+            or isinstance(layer, bool)
+            or not 0 <= layer < spec.num_layers
+        ):
+            raise ReferenceOracleError(
+                f"single_moe_layer requires layer_index in [0, {spec.num_layers - 1}]"
+            )
         if expert is not None:
             raise ReferenceOracleError("single_moe_layer forbids expert_index")
     elif layer is not None or expert is not None:
         raise ReferenceOracleError("full_model forbids layer_index and expert_index")
 
 
-def _expected_identities(scope: Mapping[str, Any]) -> tuple[dict[str, str], set[str]]:
+def _expected_identities(
+    scope: Mapping[str, Any], spec: FixedModelSpec
+) -> tuple[dict[str, str], set[str]]:
     level = scope["level"]
     layer = scope.get("layer_index")
     expert = scope.get("expert_index")
@@ -149,7 +170,7 @@ def _expected_identities(scope: Mapping[str, Any]) -> tuple[dict[str, str], set[
         {"final_logits": "model.final_logits"},
         {
             f"model.layers.{index}.mlp.router_topk_indices"
-            for index in range(NUM_LAYERS)
+            for index in range(spec.num_layers)
         },
     )
 
@@ -335,7 +356,9 @@ def _finite_float(value: Any, *, identity: str, side: str) -> float:
     return result
 
 
-def _integer(value: Any, *, identity: str, side: str) -> int:
+def _integer(
+    value: Any, *, identity: str, side: str, num_experts: int
+) -> int:
     if isinstance(value, bool):
         raise ReferenceOracleError(f"{side} router tensor {identity!r} contains a boolean")
     try:
@@ -350,7 +373,7 @@ def _integer(value: Any, *, identity: str, side: str) -> int:
         raise ReferenceOracleError(
             f"{side} router tensor {identity!r} contains a non-integer"
         ) from exc
-    if not math.isfinite(exact) or exact != result or not 0 <= result < NUM_EXPERTS:
+    if not math.isfinite(exact) or exact != result or not 0 <= result < num_experts:
         raise ReferenceOracleError(
             f"{side} router tensor {identity!r} contains an invalid expert id"
         )
@@ -465,13 +488,15 @@ def _compare_numeric(
 
 
 def _compare_router(
-    reference: Mapping[str, Any], candidate: Mapping[str, Any]
+    reference: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    spec: FixedModelSpec,
 ) -> dict[str, Any]:
     identity = reference["identity"]
     expected_count = math.prod(reference["shape"])
-    if reference["shape"][-1] != TOP_K:
+    if reference["shape"][-1] != spec.top_k:
         raise ReferenceOracleError(
-            f"router tensor {identity!r} must have trailing dimension {TOP_K}"
+            f"router tensor {identity!r} must have trailing dimension {spec.top_k}"
         )
     reference_hash = _hash_start(reference)
     candidate_hash = _hash_start(candidate)
@@ -483,8 +508,18 @@ def _compare_router(
         pair = _next_pair(left_iterator, right_iterator, identity=identity)
         if pair is None:
             break
-        left = _integer(pair[0], identity=identity, side="reference")
-        right = _integer(pair[1], identity=identity, side="candidate")
+        left = _integer(
+            pair[0],
+            identity=identity,
+            side="reference",
+            num_experts=spec.num_experts,
+        )
+        right = _integer(
+            pair[1],
+            identity=identity,
+            side="candidate",
+            num_experts=spec.num_experts,
+        )
         reference_hash.update(struct.pack("<q", left))
         candidate_hash.update(struct.pack("<q", right))
         left_values.append(left)
@@ -497,21 +532,21 @@ def _compare_router(
 
     exact = 0
     overlap_total = 0.0
-    decisions = expected_count // TOP_K
-    for offset in range(0, expected_count, TOP_K):
-        left_set = set(left_values[offset : offset + TOP_K])
-        right_set = set(right_values[offset : offset + TOP_K])
-        if len(left_set) != TOP_K or len(right_set) != TOP_K:
+    decisions = expected_count // spec.top_k
+    for offset in range(0, expected_count, spec.top_k):
+        left_set = set(left_values[offset : offset + spec.top_k])
+        right_set = set(right_values[offset : offset + spec.top_k])
+        if len(left_set) != spec.top_k or len(right_set) != spec.top_k:
             raise ReferenceOracleError(
                 f"router tensor {identity!r} contains duplicate expert ids in a Top-K row"
             )
         if left_set == right_set:
             exact += 1
-        overlap_total += len(left_set.intersection(right_set)) / TOP_K
+        overlap_total += len(left_set.intersection(right_set)) / spec.top_k
     return {
         "identity": identity,
         "shape": reference["shape"],
-        "top_k": TOP_K,
+        "top_k": spec.top_k,
         "reference": {
             "dtype": reference["dtype"],
             "sha256": reference_hash.hexdigest(),
@@ -628,6 +663,7 @@ def build_reference_oracle_comparison(
     candidate_source: str | Path | Iterable[Mapping[str, Any]],
     *,
     oracle_id: str,
+    model_id: str = MODEL_ID,
     model_revision: str,
     scope: Mapping[str, Any],
     fixture_id: str,
@@ -636,7 +672,7 @@ def build_reference_oracle_comparison(
     candidate_implementation: Mapping[str, Any],
     quality_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Compare ordered reference/candidate streams and build v1 Oracle evidence."""
+    """Compare ordered streams and build fixed-model Oracle evidence."""
 
     if not isinstance(oracle_id, str) or not oracle_id:
         raise ReferenceOracleError("oracle_id must be non-empty")
@@ -644,6 +680,10 @@ def build_reference_oracle_comparison(
         character not in "0123456789abcdef" for character in model_revision
     ):
         raise ReferenceOracleError("model_revision must be a lowercase 40-character SHA")
+    try:
+        spec = fixed_model_spec(model_id, model_revision)
+    except ContractError as exc:
+        raise ReferenceOracleError(str(exc)) from exc
     if not isinstance(fixture_id, str) or not fixture_id:
         raise ReferenceOracleError("fixture_id must be non-empty")
     if not isinstance(fixture_sha256, str) or len(fixture_sha256) != 64 or any(
@@ -660,8 +700,8 @@ def build_reference_oracle_comparison(
         raise ReferenceOracleError(
             "scope must contain exactly level, layer_index, and expert_index"
         )
-    _validate_scope(normalized_scope)
-    expected_numeric, expected_router = _expected_identities(normalized_scope)
+    _validate_scope(normalized_scope, spec)
+    expected_numeric, expected_router = _expected_identities(normalized_scope, spec)
     policy = _normalise_policy(quality_policy, level=normalized_scope["level"])
 
     reference_stream = iter(iter_tensor_records(reference_source))
@@ -696,7 +736,7 @@ def build_reference_oracle_comparison(
                 raise ReferenceOracleError(
                     f"unexpected router tensor identity {identity!r} for scope"
                 )
-            router_records.append(_compare_router(reference, candidate))
+            router_records.append(_compare_router(reference, candidate, spec))
             continue
         if expected_numeric.get(role) != identity:
             raise ReferenceOracleError(
@@ -765,12 +805,12 @@ def build_reference_oracle_comparison(
         "oracle_id": oracle_id,
         "status": status,
         "model": {
-            "model_id": MODEL_ID,
+            "model_id": spec.model_id,
             "model_revision": model_revision,
-            "model_type": MODEL_TYPE,
-            "num_layers": NUM_LAYERS,
-            "num_experts": NUM_EXPERTS,
-            "top_k": TOP_K,
+            "model_type": spec.model_type,
+            "num_layers": spec.num_layers,
+            "num_experts": spec.num_experts,
+            "top_k": spec.top_k,
         },
         "scope": normalized_scope,
         "fixture": {"id": fixture_id, "sha256": fixture_sha256},
@@ -793,9 +833,23 @@ def validate_reference_oracle_comparison(document: Mapping[str, Any]) -> None:
 
     _reject_non_finite_numbers(document)
     _validate_schema(document)
+    model = document["model"]
+    try:
+        spec = fixed_model_spec(model["model_id"], model["model_revision"])
+    except ContractError as exc:
+        raise ReferenceOracleError(str(exc)) from exc
+    if model != {
+        "model_id": spec.model_id,
+        "model_revision": spec.model_revision,
+        "model_type": spec.model_type,
+        "num_layers": spec.num_layers,
+        "num_experts": spec.num_experts,
+        "top_k": spec.top_k,
+    }:
+        raise ReferenceOracleError("Oracle model architecture is inconsistent")
     scope = document["scope"]
-    _validate_scope(scope)
-    expected_numeric, expected_router = _expected_identities(scope)
+    _validate_scope(scope, spec)
+    expected_numeric, expected_router = _expected_identities(scope, spec)
     observed_numeric = {
         tensor["role"]: tensor["identity"] for tensor in document["tensors"]
     }
@@ -873,8 +927,12 @@ def validate_reference_oracle_comparison(document: Mapping[str, Any]) -> None:
                 raise ReferenceOracleError(
                     f"router record {record['identity']!r} has an unsupported dtype"
                 )
-            expected_decisions = math.prod(record["shape"]) // TOP_K
-            if record["shape"][-1] != TOP_K or record["decision_count"] != expected_decisions:
+            expected_decisions = math.prod(record["shape"]) // spec.top_k
+            if (
+                record["shape"][-1] != spec.top_k
+                or record["top_k"] != spec.top_k
+                or record["decision_count"] != expected_decisions
+            ):
                 raise ReferenceOracleError(
                     f"router record {record['identity']!r} count does not match shape"
                 )

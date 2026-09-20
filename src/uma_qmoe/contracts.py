@@ -1701,6 +1701,9 @@ def validate_document(
         except ReferenceOracleError as exc:
             raise ContractError(str(exc)) from exc
     elif kind == "reference_oracle_policy":
+        from .fixed_models import fixed_model_spec
+
+        spec = fixed_model_spec(document["model_id"], document["model_revision"])
         scope = document["scope"]
         level = scope["level"]
         layer = scope["layer_index"]
@@ -1708,6 +1711,10 @@ def validate_document(
         if level == "single_expert":
             if layer is None or expert is None:
                 raise ContractError("single_expert policy requires layer and expert")
+            if not 0 <= layer < spec.num_layers or not 0 <= expert < spec.num_experts:
+                raise ContractError(
+                    "single_expert policy layer or expert exceeds fixed model shape"
+                )
             if document["policy"]["min_router_top_k_set_agreement"] is not None:
                 raise ContractError(
                     "single_expert policy must not set router agreement"
@@ -1715,6 +1722,10 @@ def validate_document(
         elif level == "single_moe_layer":
             if layer is None or expert is not None:
                 raise ContractError("single_moe_layer policy requires only layer")
+            if not 0 <= layer < spec.num_layers:
+                raise ContractError(
+                    "single_moe_layer policy layer exceeds fixed model shape"
+                )
             if document["policy"]["min_router_top_k_set_agreement"] is None:
                 raise ContractError("single_moe_layer policy requires router agreement")
         else:

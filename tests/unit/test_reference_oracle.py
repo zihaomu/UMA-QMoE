@@ -17,6 +17,7 @@ from uma_qmoe.reference_oracle import (
 
 
 REVISION = "9b0c1aa87e34a20052389dce1f0cf01da783f654"
+QWEN_REVISION = "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9"
 SHA256 = "a" * 64
 REFERENCE = {"id": "torch-f32", "precision": "F32", "artifact_sha256": "b" * 64}
 CANDIDATE = {"id": "torch-bf16", "precision": "BF16", "artifact_sha256": "c" * 64}
@@ -47,12 +48,15 @@ def _build(
     layer_index: int | None = 2,
     expert_index: int | None = 7,
     policy: dict | None = None,
+    model_id: str = "allenai/OLMoE-1B-7B-0125",
+    model_revision: str = REVISION,
 ) -> dict:
     return build_reference_oracle_comparison(
         reference,
         candidate,
         oracle_id="olmoe-oracle-v1",
-        model_revision=REVISION,
+        model_id=model_id,
+        model_revision=model_revision,
         scope={
             "level": level,
             "layer_index": layer_index,
@@ -188,6 +192,87 @@ def test_full_model_requires_all_sixteen_router_layers() -> None:
             level="full_model",
             layer_index=None,
             expert_index=None,
+        )
+
+
+def test_qwen_full_model_requires_twenty_four_top4_router_layers() -> None:
+    reference = [_record("model.final_logits", "final_logits", [1.0, 2.0])]
+    candidate = [_record("model.final_logits", "final_logits", [1.0, 2.0])]
+    for layer in range(24):
+        identity = f"model.layers.{layer}.mlp.router_topk_indices"
+        reference.append(
+            _record(
+                identity,
+                "router_topk_indices",
+                list(range(4)),
+                shape=[1, 4],
+                dtype="int64",
+            )
+        )
+        candidate.append(
+            _record(
+                identity,
+                "router_topk_indices",
+                list(reversed(range(4))),
+                shape=[1, 4],
+                dtype="int32",
+            )
+        )
+
+    document = _build(
+        reference,
+        candidate,
+        level="full_model",
+        layer_index=None,
+        expert_index=None,
+        model_id="Qwen/Qwen1.5-MoE-A2.7B",
+        model_revision=QWEN_REVISION,
+    )
+
+    assert document["model"] == {
+        "model_id": "Qwen/Qwen1.5-MoE-A2.7B",
+        "model_revision": QWEN_REVISION,
+        "model_type": "qwen2_moe",
+        "num_layers": 24,
+        "num_experts": 60,
+        "top_k": 4,
+    }
+    assert document["router"]["record_count"] == 24
+    assert document["router"]["top_k_set_agreement"] == 1.0
+
+
+def test_qwen_oracle_rejects_olmoe_topk_and_out_of_range_scope() -> None:
+    identity = "model.layers.2.mlp.router_topk_indices"
+    reference = [
+        _record("model.layers.2.mlp.router_logits", "router_logits", [0.0]),
+        _record("model.layers.2.mlp.output", "moe_layer_output", [0.0]),
+        _record(
+            identity,
+            "router_topk_indices",
+            list(range(8)),
+            shape=[1, 8],
+            dtype="int64",
+        ),
+    ]
+    with pytest.raises(ReferenceOracleError, match="trailing dimension 4"):
+        _build(
+            reference,
+            copy.deepcopy(reference),
+            level="single_moe_layer",
+            layer_index=2,
+            expert_index=None,
+            model_id="Qwen/Qwen1.5-MoE-A2.7B",
+            model_revision=QWEN_REVISION,
+        )
+
+    with pytest.raises(ReferenceOracleError, match=r"layer_index in \[0, 23\]"):
+        _build(
+            [_record("model.layers.24.mlp.experts.0.output", "expert_output", [0.0])],
+            [_record("model.layers.24.mlp.experts.0.output", "expert_output", [0.0])],
+            layer_index=24,
+            expert_index=0,
+            model_id="Qwen/Qwen1.5-MoE-A2.7B",
+            model_revision=QWEN_REVISION,
         )
 
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://uma-qmoe.local/schemas/reference_oracle_comparison.schema.json",
-  "title": "UMA-QMoE ReferenceOracleComparison v1",
+  "title": "UMA-QMoE Fixed-Model ReferenceOracleComparison v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -38,13 +38,23 @@
         "top_k"
       ],
       "properties": {
-        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_id": { "enum": ["allenai/OLMoE-1B-7B-0125", "Qwen/Qwen1.5-MoE-A2.7B"] },
         "model_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "model_type": { "const": "olmoe" },
-        "num_layers": { "const": 16 },
-        "num_experts": { "const": 64 },
-        "top_k": { "const": 8 }
-      }
+        "model_type": { "enum": ["olmoe", "qwen2_moe"] },
+        "num_layers": { "enum": [16, 24] },
+        "num_experts": { "enum": [60, 64] },
+        "top_k": { "enum": [4, 8] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "model_id": { "const": "allenai/OLMoE-1B-7B-0125" } } },
+          "then": { "properties": { "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" }, "model_type": { "const": "olmoe" }, "num_layers": { "const": 16 }, "num_experts": { "const": 64 }, "top_k": { "const": 8 } } }
+        },
+        {
+          "if": { "properties": { "model_id": { "const": "Qwen/Qwen1.5-MoE-A2.7B" } } },
+          "then": { "properties": { "model_revision": { "const": "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9" }, "model_type": { "const": "qwen2_moe" }, "num_layers": { "const": 24 }, "num_experts": { "const": 60 }, "top_k": { "const": 4 } } }
+        }
+      ]
     },
     "scope": { "$ref": "#/$defs/scope" },
     "fixture": {
@@ -95,7 +105,7 @@
         "layer_index": {
           "oneOf": [
             { "type": "null" },
-            { "type": "integer", "minimum": 0, "maximum": 15 }
+            { "type": "integer", "minimum": 0, "maximum": 23 }
           ]
         },
         "expert_index": {
@@ -231,7 +241,7 @@
       "properties": {
         "identity": { "type": "string", "minLength": 1 },
         "shape": { "$ref": "#/$defs/shape" },
-        "top_k": { "const": 8 },
+        "top_k": { "enum": [4, 8] },
         "reference": { "$ref": "#/$defs/identity" },
         "candidate": { "$ref": "#/$defs/identity" },
         "decision_count": { "type": "integer", "minimum": 1 },
@@ -252,7 +262,7 @@
         "records"
       ],
       "properties": {
-        "record_count": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "record_count": { "type": "integer", "minimum": 1, "maximum": 24 },
         "decision_count": { "type": "integer", "minimum": 1 },
         "exact_set_match_count": { "type": "integer", "minimum": 0 },
         "top_k_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
@@ -260,7 +270,7 @@
         "records": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 16,
+          "maxItems": 24,
           "items": { "$ref": "#/$defs/routerRecord" }
         }
       }

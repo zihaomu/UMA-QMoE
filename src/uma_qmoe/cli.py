@@ -168,6 +168,9 @@ def _build_parser() -> argparse.ArgumentParser:
     reference_oracle_parser.add_argument("reference_stream", type=Path)
     reference_oracle_parser.add_argument("candidate_stream", type=Path)
     reference_oracle_parser.add_argument("--oracle-id", required=True)
+    reference_oracle_parser.add_argument(
+        "--model-id", default="allenai/OLMoE-1B-7B-0125"
+    )
     reference_oracle_parser.add_argument("--model-revision", required=True)
     reference_oracle_parser.add_argument(
         "--level",
@@ -763,6 +766,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         raise ContractError(
                             "ReferenceOraclePolicy model revision does not match comparison"
                         )
+                    if policy_document["model_id"] != arguments.model_id:
+                        raise ContractError(
+                            "ReferenceOraclePolicy model id does not match comparison"
+                        )
                     quality_policy = policy_document["policy"]
                 else:
                     quality_policy = policy_document
@@ -770,6 +777,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.reference_stream,
                 arguments.candidate_stream,
                 oracle_id=arguments.oracle_id,
+                model_id=arguments.model_id,
                 model_revision=arguments.model_revision,
                 scope={
                     "level": arguments.level,
