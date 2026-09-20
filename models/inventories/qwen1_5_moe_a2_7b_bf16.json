@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-09-19T12:04:50Z",
   "kind": "tensor_inventory",
-  "model_manifest_sha256": "b4098c447e381fa967707e46dd7e6fe2308ff292c00769fb81ac079b10681ee7",
+  "model_manifest_sha256": "4177deb25880512317f919596e66107acb7b3d5ced49788c2f885ecb75553fdc",
   "observed_dtypes": [
     "BF16"
   ],
