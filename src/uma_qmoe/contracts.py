@@ -277,6 +277,11 @@ def validate_document(
             _require_project_relative_path(
                 oracle_derivation["path"], "$.oracle.derivation.path"
             )
+        oracle_weight_source = document["oracle"].get("weight_source")
+        if oracle_weight_source is not None:
+            _require_project_relative_path(
+                oracle_weight_source["path"], "$.oracle.weight_source.path"
+            )
         for gate in document["quality_gates"]:
             dataset = gate.get("dataset")
             if dataset is not None:
@@ -2511,9 +2516,9 @@ def _require_benchmark_frozen(document: Mapping[str, Any]) -> None:
         raise ContractError("benchmark contract is draft; frozen validation requested")
     if document["blocking_items"]:
         raise ContractError("frozen benchmark contract cannot contain blocking_items")
-    if "derivation" not in document["oracle"]:
+    if not {"derivation", "weight_source"}.intersection(document["oracle"]):
         raise ContractError(
-            "frozen benchmark contract requires a hash-bound Oracle derivation"
+            "frozen benchmark contract requires a hash-bound Oracle weight source"
         )
     budget_gate = document["resource_gates"]["safe_uma_budget"]
     if budget_gate["status"] != "frozen":
@@ -2848,6 +2853,51 @@ def _validate_benchmark_references(
             raise ContractError(
                 "Oracle weight_dtype does not match the ModelDerivation artifacts"
             )
+    weight_source = contract["oracle"].get("weight_source")
+    if weight_source is not None:
+        source_path = _validate_file_reference(
+            root,
+            weight_source["path"],
+            weight_source["sha256"],
+            "$.oracle.weight_source.path",
+        )
+        source = validate_file(source_path, require_frozen=True)
+        if weight_source["kind"] == "model_manifest":
+            if source["kind"] != "model_manifest":
+                raise ContractError(
+                    "$.oracle.weight_source must reference a ModelManifest"
+                )
+            if weight_source["path"] != model_reference["manifest_path"]:
+                raise ContractError(
+                    "Oracle ModelManifest source does not match benchmark model"
+                )
+            observed_dtypes = {
+                dtype.lower() for dtype in source["dtypes"]["observed_tensor_dtypes"]
+            }
+            dtype_names = {"bf16": "bfloat16", "f32": "float32"}
+            normalized_dtypes = {
+                dtype_names.get(dtype, dtype) for dtype in observed_dtypes
+            }
+            if normalized_dtypes != {contract["oracle"]["weight_dtype"].lower()}:
+                raise ContractError(
+                    "Oracle weight_dtype does not match ModelManifest artifacts"
+                )
+        elif weight_source["kind"] == "model_derivation":
+            if source["kind"] != "model_derivation":
+                raise ContractError(
+                    "$.oracle.weight_source must reference a ModelDerivation"
+                )
+            if source["source"]["model_manifest_path"] != model_reference["manifest_path"]:
+                raise ContractError(
+                    "Oracle derivation source does not match benchmark ModelManifest"
+                )
+            dtype_names = {"bf16": "bfloat16", "f32": "float32"}
+            observed_dtype = source["weights"]["observed_dtypes"][0].lower()
+            normalized_observed = dtype_names.get(observed_dtype, observed_dtype)
+            if normalized_observed != contract["oracle"]["weight_dtype"].lower():
+                raise ContractError(
+                    "Oracle weight_dtype does not match the ModelDerivation artifacts"
+                )
 
     for gate in contract["quality_gates"]:
         dataset = gate.get("dataset")
