@@ -9,22 +9,6 @@ model:
   manifest_sha256: 87667d3fb147eb692748ce33d0e570919281b264a3cc950b2e2e9df4dc12b13f
 
 targets:
-  - id: halo4
-    accelerator_architecture: gfx1151
-    backend: hip
-    host_toolchain:
-      container_image: ghcr.io/inferstation/vllm-rocm-halo@sha256:13d6a8e2de3e582c42d4067469c0da0c21bedd117f77a9fe95934312ee052663
-      framework: pytorch_transformers
-      torch_version: 2.14.0a0+rocm7.15.0a20260719
-      transformers_version: 5.10.2
-      backend_version: ROCm 7.15.0
-    external_baselines:
-      - id: vllm_public_v1
-        implementation: vllm
-        container_image: ghcr.io/inferstation/vllm-rocm-halo@sha256:13d6a8e2de3e582c42d4067469c0da0c21bedd117f77a9fe95934312ee052663
-        source_commit: 554a3d41f0922ee7c7f41da5a53ff891b0d0cbbb
-        source_ref: gfx11
-        status: optional
   - id: spark1
     accelerator_architecture: sm_121a
     backend: cuda
@@ -129,8 +113,11 @@ resource_gates:
   max_swap_bytes: 0
   max_major_page_faults: 0
   safe_uma_budget:
-    status: pending_measurement
-    references: []
+    status: frozen
+    references:
+      - target_id: spark1
+        path: benchmarks/budgets/spark1_safe_uma_v1.json
+        sha256: 0d9ba06f168fe7ac9f0445ed6c78b8646ddb8cd00f47099f0c1972effaff3752
   single_compressed_weight_copy: true
   allow_global_dequantized_expert: false
 
@@ -147,7 +134,6 @@ statistics:
   comparison_order: interleaved
 
 blocking_items:
-  - Capture and compare Halo4/Spark BF16 Oracle evidence
-  - Capture and freeze the dual-platform 24-layer Top-4 RouteTrace
-  - Freeze Halo4 post-reboot and Spark Safe UMA Budget references
+  - Capture and validate Spark BF16 Oracle evidence
+  - Capture and freeze the Spark 24-layer Top-4 RouteTrace
   - Freeze NLL/PPL and completion dataset revisions with immutable sample IDs
