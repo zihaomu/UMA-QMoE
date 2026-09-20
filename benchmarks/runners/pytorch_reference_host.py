@@ -178,6 +178,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-id", required=True)
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--model-id", default=MODEL_ID)
+    parser.add_argument("--model-revision", default=MODEL_REVISION)
     parser.add_argument("--prompt-fixture", type=Path, required=True)
     parser.add_argument("--prompt-id", default="general-001")
     parser.add_argument("--source-commit", required=True)
@@ -193,6 +195,13 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
+    from uma_qmoe.contracts import ContractError
+    from uma_qmoe.fixed_models import fixed_model_spec
+
+    try:
+        spec = fixed_model_spec(args.model_id, args.model_revision)
+    except ContractError as exc:
+        raise SystemExit(str(exc)) from exc
     if min(
         args.input_tokens,
         args.output_tokens,
@@ -257,8 +266,11 @@ def main() -> int:
         getattr(model.config, "num_experts", None),
         getattr(model.config, "num_experts_per_tok", None),
     )
-    if observed != ("olmoe", 16, 64, 8):
-        raise RuntimeError(f"unexpected OLMoE architecture: {observed!r}")
+    expected = (spec.model_type, spec.num_layers, spec.num_experts, spec.top_k)
+    if observed != expected:
+        raise RuntimeError(
+            f"unexpected fixed-model architecture: {observed!r}, expected {expected!r}"
+        )
 
     torch.cuda.reset_peak_memory_stats()
     for _ in range(args.warmup_requests):
@@ -309,8 +321,8 @@ def main() -> int:
         "offline_local_model": True,
         "generation_loop": "manual_past_key_values_greedy",
         "model": {
-            "model_id": MODEL_ID,
-            "model_revision": MODEL_REVISION,
+            "model_id": spec.model_id,
+            "model_revision": spec.model_revision,
             "path": str(args.model.resolve()),
         },
         "workload": {
