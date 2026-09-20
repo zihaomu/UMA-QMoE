@@ -33,13 +33,47 @@ def build_reference_host_baseline(
     container_image: str,
     model_id: str,
     model_revision: str,
-    derivation_semantic_sha256: str,
+    derivation_semantic_sha256: str | None = None,
+    weight_source_kind: str | None = None,
+    weight_source_semantic_sha256: str | None = None,
     input_tokens: int,
     output_tokens: int,
     warmup_requests: int,
     measured_requests: int,
 ) -> dict[str, Any]:
     """Build evidence for the fixed manual-cache greedy generation host."""
+
+    if weight_source_kind is None and weight_source_semantic_sha256 is None:
+        if derivation_semantic_sha256 is None:
+            raise ContractError(
+                "reference host requires a derivation or weight-source identity"
+            )
+        schema_version = 1
+        model_source = {
+            "derivation_semantic_sha256": identity(
+                derivation_semantic_sha256, "derivation_semantic_sha256", 64
+            )
+        }
+    else:
+        if derivation_semantic_sha256 is not None:
+            raise ContractError(
+                "reference host weight source cannot also claim a derivation"
+            )
+        if weight_source_kind not in {"model_derivation", "model_manifest"}:
+            raise ContractError("unsupported reference host weight source kind")
+        if weight_source_semantic_sha256 is None:
+            raise ContractError("reference host weight source SHA-256 is required")
+        schema_version = 2
+        model_source = {
+            "weight_source": {
+                "kind": weight_source_kind,
+                "semantic_sha256": identity(
+                    weight_source_semantic_sha256,
+                    "weight_source_semantic_sha256",
+                    64,
+                ),
+            }
+        }
 
     directory = Path(run_directory)
     raw = load_mapping(directory / "result.json")
@@ -102,7 +136,7 @@ def build_reference_host_baseline(
     }
     gates["overall_passed"] = all(gates.values())
     document = {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "kind": "reference_host_baseline",
         "generated_at": _utc_now(),
         "target_id": target_id,
@@ -120,9 +154,7 @@ def build_reference_host_baseline(
             "model_id": model_id,
             "revision": identity(model_revision, "model_revision", 40),
             "weight_dtype": "BF16",
-            "derivation_semantic_sha256": identity(
-                derivation_semantic_sha256, "derivation_semantic_sha256", 64
-            ),
+            **model_source,
         },
         "workload": {
             "input_tokens": input_tokens,

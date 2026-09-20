@@ -408,8 +408,13 @@ def _build_parser() -> argparse.ArgumentParser:
     reference_host_parser.add_argument("--container-image", required=True)
     reference_host_parser.add_argument("--model-id", required=True)
     reference_host_parser.add_argument("--model-revision", required=True)
+    reference_host_source = reference_host_parser.add_mutually_exclusive_group(
+        required=True
+    )
+    reference_host_source.add_argument("--derivation-semantic-sha256")
+    reference_host_source.add_argument("--weight-source-semantic-sha256")
     reference_host_parser.add_argument(
-        "--derivation-semantic-sha256", required=True
+        "--weight-source-kind", choices=("model_derivation", "model_manifest")
     )
     reference_host_parser.add_argument("--input-tokens", type=int, required=True)
     reference_host_parser.add_argument("--output-tokens", type=int, required=True)
@@ -1036,6 +1041,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 model_id=arguments.model_id,
                 model_revision=arguments.model_revision,
                 derivation_semantic_sha256=arguments.derivation_semantic_sha256,
+                weight_source_kind=arguments.weight_source_kind,
+                weight_source_semantic_sha256=(
+                    arguments.weight_source_semantic_sha256
+                ),
                 input_tokens=arguments.input_tokens,
                 output_tokens=arguments.output_tokens,
                 warmup_requests=arguments.warmup_requests,

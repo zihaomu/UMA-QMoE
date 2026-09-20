@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from uma_qmoe.contracts import ContractError, validate_document
+from uma_qmoe.cli import main as cli_main
 from uma_qmoe.reference_host_baseline import (
     build_reference_host_baseline,
     build_reference_host_run_manifest,
@@ -77,7 +78,9 @@ def _write_run(directory: Path) -> None:
     )
 
 
-def _build(directory: Path) -> dict:
+def _build(directory: Path, **source: object) -> dict:
+    if not source:
+        source = {"derivation_semantic_sha256": "d" * 64}
     return build_reference_host_baseline(
         directory,
         target_id="halo3",
@@ -86,11 +89,11 @@ def _build(directory: Path) -> dict:
         container_image="example/host@sha256:" + "b" * 64,
         model_id="allenai/OLMoE-1B-7B-0125",
         model_revision="c" * 40,
-        derivation_semantic_sha256="d" * 64,
         input_tokens=4,
         output_tokens=3,
         warmup_requests=1,
         measured_requests=3,
+        **source,
     )
 
 
@@ -117,6 +120,110 @@ def test_reference_host_baseline_rejects_relabelled_workload(tmp_path: Path) -> 
 
     with pytest.raises(ContractError, match="workload does not match"):
         _build(run)
+
+
+def test_reference_host_v2_binds_uploaded_bf16_manifest_without_fake_derivation(
+    tmp_path: Path,
+) -> None:
+    run = tmp_path / "run"
+    _write_run(run)
+    metadata_path = run / "runner-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["model"] = {
+        "model_id": "Qwen/Qwen1.5-MoE-A2.7B",
+        "model_revision": "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9",
+    }
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    document = build_reference_host_baseline(
+        run,
+        target_id="halo3",
+        source_commit="a" * 40,
+        backend="hip",
+        container_image="example/host@sha256:" + "b" * 64,
+        model_id="Qwen/Qwen1.5-MoE-A2.7B",
+        model_revision="1a758c50ecb6350748b9ce0a99d2352fd9fc11c9",
+        weight_source_kind="model_manifest",
+        weight_source_semantic_sha256="d" * 64,
+        input_tokens=4,
+        output_tokens=3,
+        warmup_requests=1,
+        measured_requests=3,
+    )
+
+    assert document["schema_version"] == 2
+    assert document["model"]["weight_source"] == {
+        "kind": "model_manifest",
+        "semantic_sha256": "d" * 64,
+    }
+    assert "derivation_semantic_sha256" not in document["model"]
+    validate_document(document)
+
+
+def test_reference_host_rejects_ambiguous_weight_provenance(tmp_path: Path) -> None:
+    run = tmp_path / "run"
+    _write_run(run)
+
+    with pytest.raises(ContractError, match="cannot also claim"):
+        _build(
+            run,
+            derivation_semantic_sha256="d" * 64,
+            weight_source_kind="model_manifest",
+            weight_source_semantic_sha256="e" * 64,
+        )
+
+
+def test_reference_host_v2_cli_routes_weight_source_to_normalizer(
+    tmp_path: Path,
+) -> None:
+    run = tmp_path / "run"
+    _write_run(run)
+    metadata_path = run / "runner-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["model"] = {
+        "model_id": "Qwen/Qwen1.5-MoE-A2.7B",
+        "model_revision": "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9",
+    }
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    output = tmp_path / "reference-host-v2.json"
+
+    status = cli_main(
+        [
+            "normalize-reference-host-baseline",
+            str(run),
+            "--target-id",
+            "halo3",
+            "--source-commit",
+            "a" * 40,
+            "--backend",
+            "hip",
+            "--container-image",
+            "example/host@sha256:" + "b" * 64,
+            "--model-id",
+            "Qwen/Qwen1.5-MoE-A2.7B",
+            "--model-revision",
+            "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9",
+            "--weight-source-kind",
+            "model_manifest",
+            "--weight-source-semantic-sha256",
+            "d" * 64,
+            "--input-tokens",
+            "4",
+            "--output-tokens",
+            "3",
+            "--warmup-requests",
+            "1",
+            "--measured-requests",
+            "3",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert status == 0
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert document["schema_version"] == 2
+    assert document["model"]["weight_source"]["kind"] == "model_manifest"
 
 
 def test_reference_host_run_manifest_binds_evidence(tmp_path: Path) -> None:
