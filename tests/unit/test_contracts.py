@@ -22,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = PROJECT_ROOT / "models/manifests/olmoe_1b_7b_0125.yaml"
 QWEN_MODEL_PATH = PROJECT_ROOT / "models/manifests/qwen1_5_moe_a2_7b.yaml"
 CONTRACT_PATH = PROJECT_ROOT / "benchmarks/contracts/olmoe_1b_7b_0125.yaml"
+QWEN_CONTRACT_PATH = PROJECT_ROOT / "benchmarks/contracts/qwen1_5_moe_a2_7b.yaml"
 
 
 def _draft_model_fixture() -> dict:
@@ -121,6 +122,39 @@ def test_draft_contract_validates_all_references_but_not_frozen_gate() -> None:
         validate_file(CONTRACT_PATH, require_frozen=True)
 
 
+def test_qwen_draft_contract_binds_uploaded_bf16_model_manifest() -> None:
+    contract = validate_file(QWEN_CONTRACT_PATH)
+
+    assert contract["schema_version"] == 2
+    assert contract["status"] == "draft"
+    assert [target["id"] for target in contract["targets"]] == ["halo4", "spark1"]
+    assert contract["oracle"]["weight_source"] == {
+        "kind": "model_manifest",
+        "path": "models/manifests/qwen1_5_moe_a2_7b.yaml",
+        "sha256": "bfec79ba70374fc738221e70dd89e2f9bbab8c4305487835ea2e89ba35130038",
+    }
+    assert "derivation" not in contract["oracle"]
+    with pytest.raises(ContractError, match="draft"):
+        validate_file(QWEN_CONTRACT_PATH, require_frozen=True)
+
+
+def test_qwen_contract_rejects_ambiguous_or_wrong_weight_source() -> None:
+    ambiguous = load_document(QWEN_CONTRACT_PATH)
+    ambiguous["oracle"]["derivation"] = {
+        "path": "models/manifests/olmoe_1b_7b_0125_bf16_oracle.yaml",
+        "sha256": "d" * 64,
+    }
+    with pytest.raises(ContractError):
+        validate_document(ambiguous)
+
+    wrong_kind = load_document(QWEN_CONTRACT_PATH)
+    wrong_kind["oracle"]["weight_source"]["kind"] = "model_derivation"
+    with pytest.raises(ContractError, match="must reference a ModelDerivation"):
+        _validate_benchmark_references(
+            wrong_kind, QWEN_CONTRACT_PATH, require_frozen=False
+        )
+
+
 def _contract_ready_for_frozen_gate_tests() -> dict:
     contract = load_document(CONTRACT_PATH)
     contract["status"] = "frozen"
@@ -174,7 +208,7 @@ def test_frozen_benchmark_requires_hash_bound_oracle_derivation() -> None:
     contract = _contract_ready_for_frozen_gate_tests()
     contract["oracle"].pop("derivation")
 
-    with pytest.raises(ContractError, match="Oracle derivation"):
+    with pytest.raises(ContractError, match="derivation"):
         validate_document(contract, require_frozen=True)
 
 
