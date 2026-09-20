@@ -151,8 +151,36 @@ def test_activation_aware_policy_accepts_complete_evidence() -> None:
     validate_document(_document())
 
 
-def test_activation_aware_policy_v2_accepts_runtime_payload_gate_without_legacy_reproduction() -> None:
+def test_v2_accepts_runtime_payload_gate_without_legacy_reproduction() -> None:
     validate_document(_v2_document())
+
+
+def test_activation_aware_policy_accepts_explicit_cross_target_reproduction() -> None:
+    document = _v2_document()
+    document["target_id"] = "spark1"
+    document["method"]["source_evidence_target_id"] = "halo3"
+    document["method"]["cross_target_reproduction"] = True
+    document["gates"]["source_target_compatible"] = True
+    validate_document(document)
+
+
+def test_activation_aware_policy_rejects_false_cross_target_provenance() -> None:
+    document = _v2_document()
+    document["target_id"] = "spark1"
+    document["method"]["source_evidence_target_id"] = "halo3"
+    document["method"]["cross_target_reproduction"] = False
+    document["gates"]["source_target_compatible"] = True
+    with pytest.raises(ContractError, match="cross-target provenance"):
+        validate_document(document)
+
+
+def test_activation_aware_policy_rejects_false_source_target_gate() -> None:
+    document = _v2_document()
+    document["method"]["source_evidence_target_id"] = "halo3"
+    document["method"]["cross_target_reproduction"] = False
+    document["gates"]["source_target_compatible"] = False
+    with pytest.raises(ContractError, match="gate"):
+        validate_document(document)
 
 
 def test_activation_aware_policy_rejects_layer_tampering() -> None:

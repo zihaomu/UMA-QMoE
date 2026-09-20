@@ -1110,6 +1110,19 @@ def validate_document(
         q8_layers = policy["q8_layers"]
         bf16_layers = policy["bf16_layers"]
         policy_version = document["schema_version"]
+        method = document["method"]
+        source_target_id = method.get("source_evidence_target_id")
+        cross_target_reproduction = method.get("cross_target_reproduction")
+        if (source_target_id is None) != (cross_target_reproduction is None):
+            raise ContractError(
+                "Activation-aware mixed policy source target provenance is incomplete"
+            )
+        if source_target_id is not None and cross_target_reproduction != (
+            source_target_id != document["target_id"]
+        ):
+            raise ContractError(
+                "Activation-aware mixed policy cross-target provenance is inconsistent"
+            )
         expected_layers = {
             1: (
                 [15],
@@ -1214,6 +1227,8 @@ def validate_document(
             )
             and math.isclose(quality["minimum_router_exact_set_agreement"], 0.99),
         }
+        if source_target_id is not None:
+            expected["source_target_compatible"] = True
         if any(gates[name] != value for name, value in expected.items()):
             raise ContractError(
                 "Activation-aware mixed policy gate does not match evidence"
