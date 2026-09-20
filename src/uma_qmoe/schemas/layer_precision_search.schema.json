@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/layer_precision_search.schema.json",
+  "title": "UMA-QMoE LayerPrecisionSearch v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "method", "dataset", "reference", "source_uniform_metrics", "storage", "searches", "quality_gate", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "layer_precision_search" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "enum": ["halo3", "spark1"] },
+    "status": { "enum": ["passed", "failed"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision", "expert_pack_sha256"],
+      "properties": {
+        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" },
+        "expert_pack_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "diagnostic_only", "materializes_expert_parameters", "performance_evidence", "base_bits", "source_compensation_evidence", "prompt_fixture"],
+      "properties": {
+        "id": { "const": "uniform-base-cumulative-bf16-layer-restore-v1" },
+        "diagnostic_only": { "const": true },
+        "materializes_expert_parameters": { "const": true },
+        "performance_evidence": { "const": false },
+        "base_bits": { "type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{ "const": 8 }, { "const": 9 }, { "const": 12 }], "items": false },
+        "source_compensation_evidence": { "$ref": "#/$defs/identity" },
+        "prompt_fixture": { "$ref": "#/$defs/identity" }
+      }
+    },
+    "dataset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sample_ids", "prompt_token_count", "target_token_count"],
+      "properties": {
+        "sample_ids": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "prompt_token_count": { "type": "integer", "minimum": 2 },
+        "target_token_count": { "type": "integer", "minimum": 2 }
+      }
+    },
+    "reference": { "$ref": "#/$defs/reference" },
+    "source_uniform_metrics": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["base_bits", "candidate_id", "metrics"],
+        "properties": {
+          "base_bits": { "enum": [8, 9, 12] },
+          "candidate_id": { "enum": ["q8-g128", "q9-g128", "q12-g128"] },
+          "metrics": { "$ref": "#/$defs/metrics" }
+        }
+      }
+    },
+    "storage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["total_expert_weight_count", "expert_weight_count_per_layer"],
+      "properties": {
+        "total_expert_weight_count": { "type": "integer", "minimum": 16 },
+        "expert_weight_count_per_layer": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "searches": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["base_bits", "base_effective_bpw", "base_metrics", "single_layer_rows", "ranking", "cumulative_rows", "first_passing_restored_layers"],
+        "properties": {
+          "base_bits": { "enum": [8, 9, 12] },
+          "base_effective_bpw": { "type": "number", "exclusiveMinimum": 0 },
+          "base_metrics": { "$ref": "#/$defs/metrics" },
+          "single_layer_rows": {
+            "type": "array", "minItems": 16, "maxItems": 16,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["restored_layer", "metrics", "finite"],
+              "properties": {
+                "restored_layer": { "type": "integer", "minimum": 0, "maximum": 15 },
+                "metrics": { "$ref": "#/$defs/metrics" },
+                "finite": { "type": "boolean" }
+              }
+            }
+          },
+          "ranking": { "type": "array", "minItems": 16, "maxItems": 16, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 15 } },
+          "cumulative_rows": {
+            "type": "array", "minItems": 16, "maxItems": 16,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["added_layer", "restored_layers", "metrics", "effective_bpw", "projected_payload_bytes", "finite"],
+              "properties": {
+                "added_layer": { "type": "integer", "minimum": 0, "maximum": 15 },
+                "restored_layers": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 15 } },
+                "metrics": { "$ref": "#/$defs/metrics" },
+                "effective_bpw": { "type": "number", "exclusiveMinimum": 0, "maximum": 16 },
+                "projected_payload_bytes": { "type": "integer", "minimum": 1 },
+                "finite": { "type": "boolean" }
+              }
+            }
+          },
+          "first_passing_restored_layers": { "oneOf": [{ "type": "null" }, { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 15 } }] }
+        }
+      }
+    },
+    "quality_gate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maximum_relative_perplexity_increase", "minimum_router_exact_set_agreement", "lowest_bpw_passing_policy"],
+      "properties": {
+        "maximum_relative_perplexity_increase": { "const": 0.01 },
+        "minimum_router_exact_set_agreement": { "const": 0.99 },
+        "lowest_bpw_passing_policy": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["base_bits", "restored_layers", "effective_bpw"],
+              "properties": {
+                "base_bits": { "enum": [8, 9, 12] },
+                "restored_layers": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 15 } },
+                "effective_bpw": { "type": "number", "exclusiveMinimum": 0, "maximum": 16 }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_evidence_compatible", "dataset_identity", "reference_finite", "base_metrics_reproduced", "all_layers_covered", "matrix_finite", "bf16_upper_bounds", "quality_gate_unchanged", "overall_passed"],
+      "properties": {
+        "source_evidence_compatible": { "type": "boolean" },
+        "dataset_identity": { "type": "boolean" },
+        "reference_finite": { "type": "boolean" },
+        "base_metrics_reproduced": { "type": "boolean" },
+        "all_layers_covered": { "type": "boolean" },
+        "matrix_finite": { "type": "boolean" },
+        "bf16_upper_bounds": { "type": "boolean" },
+        "quality_gate_unchanged": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identity": { "type": "object", "additionalProperties": false, "required": ["file_sha256", "semantic_sha256"], "properties": { "file_sha256": { "$ref": "#/$defs/sha256" }, "semantic_sha256": { "$ref": "#/$defs/sha256" } } },
+    "reference": { "type": "object", "additionalProperties": false, "required": ["finite", "nll", "perplexity", "logits_sha256", "routes_sha256"], "properties": { "finite": { "type": "boolean" }, "nll": { "type": "number", "minimum": 0 }, "perplexity": { "type": "number", "minimum": 1 }, "logits_sha256": { "$ref": "#/$defs/sha256" }, "routes_sha256": { "$ref": "#/$defs/sha256" } } },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finite", "nll", "perplexity", "relative_nll_change", "relative_perplexity_change", "top1_agreement", "logit_max_absolute_error", "logit_p99_absolute_error", "logit_cosine_similarity", "router_exact_set_agreement", "router_mean_set_overlap", "per_layer_router_exact_set_agreement"],
+      "properties": {
+        "finite": { "type": "boolean" }, "nll": { "type": "number", "minimum": 0 }, "perplexity": { "type": "number", "minimum": 1 },
+        "relative_nll_change": { "type": "number" }, "relative_perplexity_change": { "type": "number" },
+        "top1_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
+        "logit_max_absolute_error": { "type": "number", "minimum": 0 }, "logit_p99_absolute_error": { "type": "number", "minimum": 0 },
+        "logit_cosine_similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+        "router_exact_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 }, "router_mean_set_overlap": { "type": "number", "minimum": 0, "maximum": 1 },
+        "per_layer_router_exact_set_agreement": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "number", "minimum": 0, "maximum": 1 } }
+      }
+    }
+  }
+}

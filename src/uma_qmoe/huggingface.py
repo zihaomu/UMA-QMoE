@@ -246,13 +246,13 @@ def _parse_architecture(config: Mapping[str, Any]) -> dict[str, Any]:
             "config must declare boolean normalize_top_k_probability or norm_topk_prob"
         )
 
-    return {
+    architecture = {
         "class_name": architectures[0],
         "model_type": model_type,
         "num_layers": _require_integer(config, "num_hidden_layers", "num_layers"),
         "hidden_size": _require_integer(config, "hidden_size"),
         "expert_intermediate_size": _require_integer(
-            config, "intermediate_size", "moe_intermediate_size", "expert_intermediate_size"
+            config, "moe_intermediate_size", "expert_intermediate_size", "intermediate_size"
         ),
         "num_experts": _require_integer(config, "num_experts", "num_local_experts"),
         "top_k": _require_integer(
@@ -261,6 +261,11 @@ def _parse_architecture(config: Mapping[str, Any]) -> dict[str, Any]:
         "max_position_embeddings": _require_integer(config, "max_position_embeddings"),
         "normalize_top_k_probability": normalize_value,
     }
+    if "shared_expert_intermediate_size" in config:
+        architecture["shared_expert_intermediate_size"] = _require_integer(
+            config, "shared_expert_intermediate_size"
+        )
+    return architecture
 
 
 def _lfs_weight_identity(path: str, sibling: Mapping[str, Any]) -> dict[str, Any]:

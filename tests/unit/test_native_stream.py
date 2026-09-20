@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+import shutil
+from types import SimpleNamespace
 
 import pytest
 
+from uma_qmoe import native_stream
 from uma_qmoe.contracts import ContractError, validate_document
 from uma_qmoe.native_stream import _native_compile_command
 
@@ -107,6 +110,69 @@ def test_hip_compile_command_embeds_wheel_sdk_runtime_path(tmp_path: Path) -> No
 
     assert f"-Wl,-rpath,{sdk / 'lib'}" in command
     assert "--offload-arch=gfx1151" in command
+
+
+def test_hip_compile_command_resolves_runtime_from_hipconfig(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wrapper = tmp_path / "usr" / "local" / "bin" / "hipcc"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.touch()
+    sdk = tmp_path / "site-packages" / "_rocm_sdk_devel"
+    hipconfig = sdk / "bin" / "hipconfig"
+    runtime = sdk / "lib" / "libamdhip64.so"
+    hipconfig.parent.mkdir(parents=True)
+    runtime.parent.mkdir(parents=True)
+    hipconfig.touch()
+    runtime.touch()
+    original_which = shutil.which
+
+    def fake_which(command: str) -> str | None:
+        if command == "hipconfig":
+            return str(hipconfig)
+        return original_which(command)
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    command = _native_compile_command(
+        compiler=str(wrapper),
+        backend="hip",
+        architecture="gfx1151",
+        source=Path("native_stream.cu"),
+        executable=Path("native-stream"),
+    )
+
+    assert f"-Wl,-rpath,{sdk / 'lib'}" in command
+
+
+def test_hip_compile_command_uses_hipconfig_reported_sdk_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wrappers = tmp_path / "usr" / "local" / "bin"
+    compiler = wrappers / "hipcc"
+    hipconfig = wrappers / "hipconfig"
+    wrappers.mkdir(parents=True)
+    compiler.touch()
+    hipconfig.touch()
+    sdk = tmp_path / "site-packages" / "_rocm_sdk_devel"
+    runtime = sdk / "lib" / "libamdhip64.so"
+    runtime.parent.mkdir(parents=True)
+    runtime.touch()
+    monkeypatch.setattr(shutil, "which", lambda command: str(hipconfig))
+    monkeypatch.setattr(
+        native_stream,
+        "_run_checked",
+        lambda command, timeout: SimpleNamespace(stdout=str(sdk)),
+    )
+
+    command = _native_compile_command(
+        compiler=str(compiler),
+        backend="hip",
+        architecture="gfx1151",
+        source=Path("native_stream.cu"),
+        executable=Path("native-stream"),
+    )
+
+    assert f"-Wl,-rpath,{sdk / 'lib'}" in command
 
 
 def test_cuda_compile_command_does_not_add_rocm_rpath(tmp_path: Path) -> None:

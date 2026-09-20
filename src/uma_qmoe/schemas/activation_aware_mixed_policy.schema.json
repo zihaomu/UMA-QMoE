@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/activation_aware_mixed_policy.schema.json",
+  "title": "UMA-QMoE ActivationAwareMixedPolicy v1/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "method", "dataset", "reference", "source_q8_base_metrics", "q8_base_metrics", "q8_base_reproduced", "policy", "storage", "quality_gate", "gates"],
+  "properties": {
+    "schema_version": { "enum": [1, 2] },
+    "kind": { "const": "activation_aware_mixed_policy" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "enum": ["halo3", "spark1"] },
+    "status": { "enum": ["passed", "failed"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision"],
+      "properties": {
+        "model_id": { "const": "allenai/OLMoE-1B-7B-0125" },
+        "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" }
+      }
+    },
+    "method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "source_reverse_layer_evidence", "prompt_fixture", "calibration_only", "performance_evidence", "q4_group_size", "q4_clip_ratios", "q8_group_size"],
+      "properties": {
+        "id": { "enum": ["layer15-awq-q4-q8-bf16-mixed-v1", "layer15-awq-q4-q8-bf16-mixed-v2"] },
+        "source_reverse_layer_evidence": { "$ref": "#/$defs/identity" },
+        "source_evidence_target_id": { "enum": ["halo3", "spark1"] },
+        "cross_target_reproduction": { "type": "boolean" },
+        "prompt_fixture": { "$ref": "#/$defs/identity" },
+        "calibration_only": { "const": false },
+        "performance_evidence": { "const": false },
+        "q4_group_size": { "const": 128 },
+        "q4_clip_ratios": {
+          "type": "array", "minItems": 10, "maxItems": 10,
+          "prefixItems": [{"const": 1.0}, {"const": 0.98}, {"const": 0.95}, {"const": 0.92}, {"const": 0.9}, {"const": 0.87}, {"const": 0.85}, {"const": 0.8}, {"const": 0.75}, {"const": 0.7}],
+          "items": false
+        },
+        "q8_group_size": { "const": 128 }
+      },
+      "dependentRequired": {
+        "source_evidence_target_id": ["cross_target_reproduction"],
+        "cross_target_reproduction": ["source_evidence_target_id"]
+      }
+    },
+    "dataset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["calibration_sample_ids", "evaluation_sample_ids", "evaluation_prompt_token_count", "evaluation_target_token_count"],
+      "properties": {
+        "calibration_sample_ids": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "evaluation_sample_ids": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "evaluation_prompt_token_count": { "type": "integer", "minimum": 2 },
+        "evaluation_target_token_count": { "type": "integer", "minimum": 2 }
+      }
+    },
+    "reference": { "$ref": "#/$defs/reference" },
+    "source_q8_base_metrics": { "$ref": "#/$defs/metrics" },
+    "q8_base_metrics": { "$ref": "#/$defs/metrics" },
+    "q8_base_reproduced": { "type": "boolean" },
+    "policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["policy_id", "q4_layers", "q8_layers", "bf16_layers", "effective_bpw", "projected_payload_bytes", "metrics"],
+      "properties": {
+        "policy_id": { "enum": ["olmoe-layer15-awq-q4-q8-bf16-v1", "olmoe-layer15-awq-q4-q8-bf16-v2"] },
+        "q4_layers": { "const": [15] },
+        "q8_layers": { "enum": [[8, 11, 12, 13, 14], [11, 12, 13, 14]] },
+        "bf16_layers": { "enum": [[0, 1, 2, 3, 4, 5, 6, 7, 9, 10], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]] },
+        "effective_bpw": { "type": "number", "exclusiveMinimum": 0 },
+        "projected_payload_bytes": { "type": "integer", "minimum": 1 },
+        "metrics": { "$ref": "#/$defs/metrics" }
+      }
+    },
+    "storage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["total_expert_weight_count", "q4_effective_bpw", "q8_effective_bpw", "bf16_effective_bpw", "policy_effective_bpw", "projected_payload_bytes"],
+      "properties": {
+        "total_expert_weight_count": { "const": 6442450944 },
+        "q4_effective_bpw": { "const": 4.25 },
+        "q8_effective_bpw": { "const": 8.25 },
+        "bf16_effective_bpw": { "const": 16.0 },
+        "policy_effective_bpw": { "type": "number", "exclusiveMinimum": 0 },
+        "projected_payload_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "quality_gate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maximum_relative_perplexity_increase", "minimum_router_exact_set_agreement"],
+      "properties": {
+        "maximum_relative_perplexity_increase": { "const": 0.01 },
+        "minimum_router_exact_set_agreement": { "const": 0.99 }
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_evidence_compatible", "dataset_identity", "dataset_split_disjoint", "reference_finite", "q8_base_reproduced", "q8_base_quality_passed", "policy_finite", "policy_quality_passed", "storage_accounting", "quality_gate_unchanged", "overall_passed"],
+      "properties": {
+        "source_evidence_compatible": { "type": "boolean" },
+        "source_target_compatible": { "type": "boolean" },
+        "dataset_identity": { "type": "boolean" },
+        "dataset_split_disjoint": { "type": "boolean" },
+        "reference_finite": { "type": "boolean" },
+        "q8_base_reproduced": { "type": "boolean" },
+        "q8_base_quality_passed": { "type": "boolean" },
+        "policy_finite": { "type": "boolean" },
+        "policy_quality_passed": { "type": "boolean" },
+        "storage_accounting": { "type": "boolean" },
+        "quality_gate_unchanged": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identity": { "type": "object", "additionalProperties": false, "required": ["file_sha256", "semantic_sha256"], "properties": { "file_sha256": { "$ref": "#/$defs/sha256" }, "semantic_sha256": { "$ref": "#/$defs/sha256" } } },
+    "reference": { "type": "object", "additionalProperties": false, "required": ["finite", "nll", "perplexity", "logits_sha256", "routes_sha256"], "properties": { "finite": { "type": "boolean" }, "nll": { "type": "number", "minimum": 0 }, "perplexity": { "type": "number", "minimum": 1 }, "logits_sha256": { "$ref": "#/$defs/sha256" }, "routes_sha256": { "$ref": "#/$defs/sha256" } } },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finite", "nll", "perplexity", "relative_nll_change", "relative_perplexity_change", "top1_agreement", "logit_max_absolute_error", "logit_p99_absolute_error", "logit_cosine_similarity", "router_exact_set_agreement", "router_mean_set_overlap", "per_layer_router_exact_set_agreement"],
+      "properties": {
+        "finite": { "type": "boolean" }, "nll": { "type": "number", "minimum": 0 }, "perplexity": { "type": "number", "minimum": 1 },
+        "relative_nll_change": { "type": "number" }, "relative_perplexity_change": { "type": "number" },
+        "top1_agreement": { "type": "number", "minimum": 0, "maximum": 1 },
+        "logit_max_absolute_error": { "type": "number", "minimum": 0 }, "logit_p99_absolute_error": { "type": "number", "minimum": 0 },
+        "logit_cosine_similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+        "router_exact_set_agreement": { "type": "number", "minimum": 0, "maximum": 1 }, "router_mean_set_overlap": { "type": "number", "minimum": 0, "maximum": 1 },
+        "per_layer_router_exact_set_agreement": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "number", "minimum": 0, "maximum": 1 } }
+      }
+    }
+  }
+}

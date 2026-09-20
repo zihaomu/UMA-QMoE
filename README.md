@@ -4,11 +4,27 @@ UMA-QMoE is a quantization-native MoE inference project for bandwidth-constraine
 unified-memory systems. The first targets are NVIDIA DGX Spark / GB10 and AMD
 Strix Halo / Radeon 8060S.
 
-The repository is in the M0 bootstrap stage. Current code establishes
-machine-readable, fail-closed model, benchmark, target, machine, memory,
-Safe UMA, acquisition, tensor-inventory, derivation, Oracle-smoke, memory-
-bandwidth, allocation-matrix, native-stream, and run contracts before kernel
-performance claims begin.
+The public control plane and the OLMoE M0-M1 foundation are established. Active
+work is closing the Spark-only M2 path and preparing Qwen M3-M5 target evidence.
+See the [project handoff and recovery status](doc/UMA_QMOE_PROJECT_HANDOFF.md) for
+the authoritative checkpoint, MVP distance, blockers, and restore order.
+
+## Runtime boundary
+
+UMA-QMoE does not embed vLLM. The core path is a fixed PyTorch/Hugging Face
+model host that loads dense BF16 tensors, maps one Q4 ExpertPack, and invokes
+the project-owned `uma_qmoe::moe_forward` operator. vLLM remains an isolated
+external comparison under `benchmarks/external/vllm/`; CI rejects imports in
+either direction between that external runner and the core runtime.
+
+The operator includes the CPU correctness implementation, guarded SM121/gfx1151
+dispatch, and a target-compiled W4A16 backend that reads canonical packed Q4
+bytes and FP32 group-128 scales directly. Call
+`uma_qmoe.native_backend.install_packed_q4_backend()` before selecting
+performance mode. Performance mode still fails closed when the backend is not
+explicitly installed, so benchmark runs cannot silently fall back to the
+correctness implementation. The first native backend is a correctness-first
+microkernel baseline; its single-layer timing is not an end-to-end TPS claim.
 
 ## Bootstrap development
 
@@ -141,6 +157,24 @@ uv run umaq estimate-weight-traffic \
   --tensor-alignment 128 \
   --output models/estimates/olmoe_q4_group128.json
 ```
+
+Spark deliberately does not require privileged performance counters. Build the
+versioned traffic sensitivity model from the frozen source ledger, canonical Q4
+estimate, RouteTrace, unprivileged bandwidth soak, and local BF16 config:
+
+```bash
+uv run umaq build-spark-traffic-model \
+  benchmarks/sources/spark1_traffic_source_ledger_v1.json \
+  models/estimates/olmoe_q4_group128.json \
+  benchmarks/traces/olmoe_1b_7b_0125_128x32_greedy_v1.json \
+  /absolute/path/to/spark1-bandwidth-soak-v1.json \
+  /absolute/path/to/bf16-rne-v1/config.json \
+  --output /absolute/path/to/spark1-traffic-model.json
+```
+
+The report is restricted to `modeled_estimated`: its token rates are bandwidth
+ceilings over explicit amplification factors, not measured DRAM traffic or
+end-to-end throughput.
 
 Once that manifest is frozen, derive the deterministic BF16 Oracle without
 materializing a whole shard in memory. This path uses explicit

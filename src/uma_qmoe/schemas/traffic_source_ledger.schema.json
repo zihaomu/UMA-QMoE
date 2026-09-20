@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/traffic_source_ledger.schema.json",
+  "title": "UMA-QMoE TrafficSourceLedger v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "ledger_id", "captured_at", "target_id", "status", "sources", "decision"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "traffic_source_ledger" },
+    "ledger_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "const": "spark1" },
+    "status": { "const": "frozen" },
+    "sources": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "source_type", "publisher", "title", "url", "accessed_on", "artifact", "claims", "limitations"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+          "source_type": { "enum": ["official_specification", "local_measurement", "derived_contract"] },
+          "publisher": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "url": { "type": ["string", "null"], "format": "uri" },
+          "accessed_on": { "type": "string", "format": "date" },
+          "artifact": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "file_sha256", "semantic_sha256"],
+                "properties": {
+                  "path": { "type": "string", "minLength": 1 },
+                  "file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                  "semantic_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                }
+              }
+            ]
+          },
+          "claims": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "metric", "value", "unit", "evidence_class"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+                "metric": { "type": "string", "minLength": 1 },
+                "value": { "type": "number", "minimum": 0 },
+                "unit": { "type": "string", "minLength": 1 },
+                "evidence_class": { "enum": ["specified", "measured_algorithmic", "derived"] }
+              }
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["privileged_counters_used", "measured_dram_bytes_available", "allowed_result_labels", "prohibited_claims"],
+      "properties": {
+        "privileged_counters_used": { "const": false },
+        "measured_dram_bytes_available": { "const": false },
+        "allowed_result_labels": { "const": ["modeled", "estimated"] },
+        "prohibited_claims": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

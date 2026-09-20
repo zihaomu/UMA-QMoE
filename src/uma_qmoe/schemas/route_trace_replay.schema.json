@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/route_trace_replay.schema.json",
+  "title": "UMA-QMoE RouteTrace Replay Summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "generated_at", "trace_semantic_sha256",
+    "route_payload_sha256", "event_layer_records", "event_count",
+    "layer_count", "tokens_per_layer", "expert_assignments"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "route_trace_replay" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "trace_semantic_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "route_payload_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "event_layer_records": { "type": "integer", "minimum": 32 },
+    "event_count": { "type": "integer", "minimum": 2 },
+    "layer_count": { "enum": [16, 24] },
+    "tokens_per_layer": { "type": "integer", "minimum": 2 },
+    "expert_assignments": { "type": "integer", "minimum": 192 }
+  }
+}

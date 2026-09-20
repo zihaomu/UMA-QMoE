@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/reference_oracle_policy.schema.json",
+  "title": "UMA-QMoE Fixed-Model ReferenceOraclePolicy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "policy_id", "status", "model_id",
+    "model_revision", "scope", "calibration", "policy"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "reference_oracle_policy" },
+    "policy_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "const": "frozen" },
+    "model_id": { "enum": ["allenai/OLMoE-1B-7B-0125", "Qwen/Qwen1.5-MoE-A2.7B"] },
+    "model_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["level", "layer_index", "expert_index"],
+      "properties": {
+        "level": { "enum": ["single_expert", "single_moe_layer", "full_model"] },
+        "layer_index": { "type": ["integer", "null"], "minimum": 0, "maximum": 23 },
+        "expert_index": { "type": ["integer", "null"], "minimum": 0, "maximum": 63 }
+      }
+    },
+    "calibration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference_target", "candidate_target", "evidence_semantic_sha256", "margin_rule"],
+      "properties": {
+        "reference_target": { "type": "string", "minLength": 1 },
+        "candidate_target": { "type": "string", "minLength": 1 },
+        "evidence_semantic_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "margin_rule": { "type": "string", "minLength": 1 }
+      }
+    },
+    "policy": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "status", "percentile_method", "relative_error_epsilon",
+        "max_absolute_error", "max_relative_error", "max_p99_absolute_error",
+        "max_p99_relative_error", "min_cosine_similarity",
+        "min_router_top_k_set_agreement"
+      ],
+      "properties": {
+        "status": { "const": "frozen" },
+        "percentile_method": { "const": "nearest_rank" },
+        "relative_error_epsilon": { "type": "number", "exclusiveMinimum": 0 },
+        "max_absolute_error": { "type": "number", "minimum": 0 },
+        "max_relative_error": { "type": "number", "minimum": 0 },
+        "max_p99_absolute_error": { "type": "number", "minimum": 0 },
+        "max_p99_relative_error": { "type": "number", "minimum": 0 },
+        "min_cosine_similarity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "min_router_top_k_set_agreement": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "number", "minimum": 0, "maximum": 1 }
+          ]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "model_id": { "const": "allenai/OLMoE-1B-7B-0125" } } },
+      "then": { "properties": { "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" } } }
+    },
+    {
+      "if": { "properties": { "model_id": { "const": "Qwen/Qwen1.5-MoE-A2.7B" } } },
+      "then": { "properties": { "model_revision": { "const": "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9" } } }
+    }
+  ]
+}

@@ -20,7 +20,9 @@ from uma_qmoe.machine import collect_machine_baseline
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = PROJECT_ROOT / "models/manifests/olmoe_1b_7b_0125.yaml"
+QWEN_MODEL_PATH = PROJECT_ROOT / "models/manifests/qwen1_5_moe_a2_7b.yaml"
 CONTRACT_PATH = PROJECT_ROOT / "benchmarks/contracts/olmoe_1b_7b_0125.yaml"
+QWEN_CONTRACT_PATH = PROJECT_ROOT / "benchmarks/contracts/qwen1_5_moe_a2_7b.yaml"
 
 
 def _draft_model_fixture() -> dict:
@@ -61,6 +63,41 @@ def test_pinned_olmoe_manifest_matches_architecture_golden_values() -> None:
     assert manifest["dtypes"]["evidence_conflict"] is True
 
 
+def test_pinned_qwen_moe_manifest_matches_architecture_golden_values() -> None:
+    manifest = validate_file(QWEN_MODEL_PATH, require_frozen=True)
+
+    assert manifest["status"] == "frozen"
+    assert manifest["model_revision"] == "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9"
+    assert manifest["architecture"] == {
+        "class_name": "Qwen2MoeForCausalLM",
+        "model_type": "qwen2_moe",
+        "num_layers": 24,
+        "hidden_size": 2048,
+        "expert_intermediate_size": 1408,
+        "shared_expert_intermediate_size": 5632,
+        "num_experts": 60,
+        "top_k": 4,
+        "max_position_embeddings": 8192,
+        "normalize_top_k_probability": False,
+        "declared_total_parameters": "14.3B",
+        "declared_active_parameters": "2.7B",
+    }
+    assert manifest["dtypes"]["uploaded_weights"] == "bfloat16"
+    assert manifest["dtypes"]["api_reported_parameter_counts"] == {
+        "BF16": 14_315_784_192
+    }
+    assert manifest["dtypes"]["observed_tensor_dtypes"] == ["BF16"]
+    assert manifest["weights"]["tensor_inventory"] == {
+        "path": "models/inventories/qwen1_5_moe_a2_7b_bf16.json",
+        "sha256": "24d6ea5f730c73376103cda89057230f4851c0df0b5e5b140d263f295c8b6f3d",
+        "source_manifest_sha256": (
+            "4177deb25880512317f919596e66107acb7b3d5ced49788c2f885ecb75553fdc"
+        ),
+    }
+    assert manifest["dtypes"]["evidence_conflict"] is False
+    assert len(manifest["weights"]["artifacts"]) == 9
+
+
 def test_semantic_hash_is_stable_across_key_order_and_resolution_time() -> None:
     manifest = load_document(MODEL_PATH)
     reordered = dict(reversed(list(manifest.items())))
@@ -83,6 +120,40 @@ def test_draft_contract_validates_all_references_but_not_frozen_gate() -> None:
     assert contract["quality_gates"][2]["min_router_top_k_set_agreement"] == 0.99
     with pytest.raises(ContractError, match="draft"):
         validate_file(CONTRACT_PATH, require_frozen=True)
+
+
+def test_qwen_draft_contract_binds_uploaded_bf16_model_manifest() -> None:
+    contract = validate_file(QWEN_CONTRACT_PATH)
+
+    assert contract["schema_version"] == 2
+    assert contract["status"] == "draft"
+    assert [target["id"] for target in contract["targets"]] == ["spark1"]
+    assert contract["resource_gates"]["safe_uma_budget"]["status"] == "frozen"
+    assert contract["oracle"]["weight_source"] == {
+        "kind": "model_manifest",
+        "path": "models/manifests/qwen1_5_moe_a2_7b.yaml",
+        "sha256": "bfec79ba70374fc738221e70dd89e2f9bbab8c4305487835ea2e89ba35130038",
+    }
+    assert "derivation" not in contract["oracle"]
+    with pytest.raises(ContractError, match="draft"):
+        validate_file(QWEN_CONTRACT_PATH, require_frozen=True)
+
+
+def test_qwen_contract_rejects_ambiguous_or_wrong_weight_source() -> None:
+    ambiguous = load_document(QWEN_CONTRACT_PATH)
+    ambiguous["oracle"]["derivation"] = {
+        "path": "models/manifests/olmoe_1b_7b_0125_bf16_oracle.yaml",
+        "sha256": "d" * 64,
+    }
+    with pytest.raises(ContractError):
+        validate_document(ambiguous)
+
+    wrong_kind = load_document(QWEN_CONTRACT_PATH)
+    wrong_kind["oracle"]["weight_source"]["kind"] = "model_derivation"
+    with pytest.raises(ContractError, match="must reference a ModelDerivation"):
+        _validate_benchmark_references(
+            wrong_kind, QWEN_CONTRACT_PATH, require_frozen=False
+        )
 
 
 def _contract_ready_for_frozen_gate_tests() -> dict:
@@ -138,7 +209,7 @@ def test_frozen_benchmark_requires_hash_bound_oracle_derivation() -> None:
     contract = _contract_ready_for_frozen_gate_tests()
     contract["oracle"].pop("derivation")
 
-    with pytest.raises(ContractError, match="Oracle derivation"):
+    with pytest.raises(ContractError, match="derivation"):
         validate_document(contract, require_frozen=True)
 
 
@@ -162,6 +233,7 @@ def test_required_quality_gate_requires_threshold_and_evidence() -> None:
     no_trace = _contract_ready_for_frozen_gate_tests()
     gate = no_trace["quality_gates"][2]
     gate["applicability"] = "required"
+    gate.pop("trace_reference", None)
     with pytest.raises(ContractError, match="pinned trace reference"):
         validate_document(no_trace, require_frozen=True)
 
@@ -340,6 +412,12 @@ def test_run_manifest_rejects_secret_like_environment_names() -> None:
     }
 
     with pytest.raises(ContractError, match="secret-like"):
+        validate_document(run)
+
+    run["command"]["environment_allowlist"] = {}
+    artifact = {"path": "result.json", "sha256": "5" * 64, "size_bytes": 1}
+    run["raw_artifacts"] = [artifact, copy.deepcopy(artifact)]
+    with pytest.raises(ContractError, match="duplicate paths"):
         validate_document(run)
 
 

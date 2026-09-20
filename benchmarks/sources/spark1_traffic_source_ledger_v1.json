@@ -1,0 +1,130 @@
+{
+  "captured_at": "2026-09-19T00:00:00Z",
+  "decision": {
+    "allowed_result_labels": [
+      "modeled",
+      "estimated"
+    ],
+    "measured_dram_bytes_available": false,
+    "privileged_counters_used": false,
+    "prohibited_claims": [
+      "measured DRAM bytes for OLMoE on Spark",
+      "measured workload traffic amplification on Spark",
+      "end-to-end throughput inferred solely from bandwidth"
+    ]
+  },
+  "kind": "traffic_source_ledger",
+  "ledger_id": "spark1-olmoe-q4-traffic-v1",
+  "schema_version": 1,
+  "sources": [
+    {
+      "accessed_on": "2026-09-19",
+      "artifact": null,
+      "claims": [
+        {
+          "evidence_class": "specified",
+          "id": "dgx_spark_unified_memory_capacity_gb",
+          "metric": "coherent unified LPDDR5x system memory capacity",
+          "unit": "GB",
+          "value": 128.0
+        },
+        {
+          "evidence_class": "specified",
+          "id": "dgx_spark_memory_bandwidth_spec_gbps",
+          "metric": "physical memory bandwidth specification",
+          "unit": "GB/s",
+          "value": 273.0
+        }
+      ],
+      "id": "nvidia-dgx-spark-hardware-20260910",
+      "limitations": [
+        "The specification is a physical platform limit, not an OLMoE workload measurement.",
+        "The value does not reveal cache hit rate, replay, page migration, or contention."
+      ],
+      "publisher": "NVIDIA",
+      "source_type": "official_specification",
+      "title": "DGX Spark User Guide: Hardware Overview",
+      "url": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html"
+    },
+    {
+      "accessed_on": "2026-09-19",
+      "artifact": {
+        "file_sha256": "72c736b0ed0c640e97a7238ba058a7bedb6194438c54222886d9d9a453bde10d",
+        "path": "lab-private/state/spark1-bandwidth-soak-v1.json",
+        "semantic_sha256": "bbce71685b93aaa8fdcdc1398dfd4c436d21e42592f1b1f4e2c9f73233521868"
+      },
+      "claims": [
+        {
+          "evidence_class": "measured_algorithmic",
+          "id": "spark1_read_reduce_p50_algorithmic_gbps",
+          "metric": "30-minute unprivileged native read-reduce algorithmic P50 bandwidth",
+          "unit": "GB/s",
+          "value": 243.56989275164187
+        }
+      ],
+      "id": "spark1-bandwidth-soak-v1",
+      "limitations": [
+        "Traffic is known algorithmic bytes divided by elapsed time, not measured DRAM bytes.",
+        "The read-reduce kernel includes reduction arithmetic and does not reproduce OLMoE access locality."
+      ],
+      "publisher": "UMA-QMoE local evidence",
+      "source_type": "local_measurement",
+      "title": "Spark 30-minute native bandwidth soak",
+      "url": null
+    },
+    {
+      "accessed_on": "2026-09-19",
+      "artifact": {
+        "file_sha256": "8ea79a3dd89299b61fb69b225b10761b477ae28cc06caaac779d03136418b330",
+        "path": "models/estimates/olmoe_q4_group128.json",
+        "semantic_sha256": "87e76e2aca828bd42cf358d26337d62a104afae7c47976ab44a173ba5e3eaccf"
+      },
+      "claims": [
+        {
+          "evidence_class": "derived",
+          "id": "olmoe_q4_cold_weight_bytes_per_decode_token",
+          "metric": "canonical Q4 group-128 cold weight bytes per batch-1 decode token",
+          "unit": "bytes/token",
+          "value": 1162616832
+        }
+      ],
+      "id": "olmoe-q4-weight-traffic-v1",
+      "limitations": [
+        "The estimate excludes KV, activation, workspace, cache reuse, and hardware amplification.",
+        "Expert selection uses the conservative Top-8-per-layer cold-read bound."
+      ],
+      "publisher": "UMA-QMoE derived contract",
+      "source_type": "derived_contract",
+      "title": "OLMoE canonical Q4 weight traffic estimate",
+      "url": null
+    },
+    {
+      "accessed_on": "2026-09-19",
+      "artifact": {
+        "file_sha256": "83a2b4e74af92e7796c926609da57c85f8f1c919901a49f45c17172e0a8f4297",
+        "path": "benchmarks/traces/olmoe_1b_7b_0125_128x32_greedy_v1.json",
+        "semantic_sha256": "4d1cdb1b2d57d74c2b69b72e3a17247353a7ec5e052cdbec4d58f057f467c09c"
+      },
+      "claims": [
+        {
+          "evidence_class": "derived",
+          "id": "olmoe_route_trace_expert_assignments",
+          "metric": "expert assignments across the frozen 128+32 RouteTrace",
+          "unit": "assignments",
+          "value": 20352
+        }
+      ],
+      "id": "olmoe-route-trace-128x32-v1",
+      "limitations": [
+        "The canonical trace comes from Halo and fixes logical routing shape, not Spark physical traffic.",
+        "The trace does not contain hardware cache or DRAM transaction observations."
+      ],
+      "publisher": "UMA-QMoE derived contract",
+      "source_type": "derived_contract",
+      "title": "OLMoE frozen RouteTrace 128+32 greedy",
+      "url": null
+    }
+  ],
+  "status": "frozen",
+  "target_id": "spark1"
+}

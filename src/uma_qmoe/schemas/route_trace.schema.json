@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/route_trace.schema.json",
+  "title": "UMA-QMoE RouteTrace v1/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "trace_id", "status", "captured_at",
+    "source_capture_sha256", "model", "fixture", "workload", "capture",
+    "events", "layers", "summary", "route_payload_sha256"
+  ],
+  "properties": {
+    "schema_version": { "enum": [1, 2] },
+    "kind": { "const": "route_trace" },
+    "trace_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+    "status": { "const": "frozen" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "source_capture_sha256": { "$ref": "#/$defs/sha256" },
+    "route_payload_sha256": { "$ref": "#/$defs/sha256" },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision", "num_layers", "num_experts", "top_k"],
+      "properties": {
+        "model_id": { "enum": ["allenai/OLMoE-1B-7B-0125", "Qwen/Qwen1.5-MoE-A2.7B"] },
+        "model_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "num_layers": { "enum": [16, 24] },
+        "num_experts": { "enum": [60, 64] },
+        "top_k": { "enum": [4, 8] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "model_id": { "const": "allenai/OLMoE-1B-7B-0125" } } },
+          "then": { "properties": { "model_revision": { "const": "9b0c1aa87e34a20052389dce1f0cf01da783f654" }, "num_layers": { "const": 16 }, "num_experts": { "const": 64 }, "top_k": { "const": 8 } } }
+        },
+        {
+          "if": { "properties": { "model_id": { "const": "Qwen/Qwen1.5-MoE-A2.7B" } } },
+          "then": { "properties": { "model_revision": { "const": "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9" }, "num_layers": { "const": 24 }, "num_experts": { "const": 60 }, "top_k": { "const": 4 } } }
+        }
+      ]
+    },
+    "fixture": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "sha256", "token_ids_sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "token_ids_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "workload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["batch_size", "prompt_tokens", "output_tokens", "decoding", "ignore_eos"],
+      "properties": {
+        "batch_size": { "type": "integer", "minimum": 1 },
+        "prompt_tokens": { "type": "integer", "minimum": 1 },
+        "output_tokens": { "type": "integer", "minimum": 1 },
+        "decoding": { "const": "greedy" },
+        "ignore_eos": { "const": true }
+      }
+    },
+    "capture": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_id", "backend", "torch_version", "transformers_version"],
+      "properties": {
+        "target_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+        "backend": { "enum": ["cuda", "hip"] },
+        "torch_version": { "type": "string", "minLength": 1 },
+        "transformers_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "events": {
+      "type": "array", "minItems": 2,
+      "items": { "$ref": "#/$defs/event" }
+    },
+    "layers": {
+      "type": "array", "minItems": 16, "maxItems": 24,
+      "items": { "$ref": "#/$defs/layer" }
+    },
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_count", "layer_count", "tokens_per_layer", "routed_token_decisions", "expert_assignments", "batch_shapes"],
+      "properties": {
+        "event_count": { "type": "integer", "minimum": 2 },
+        "layer_count": { "enum": [16, 24] },
+        "tokens_per_layer": { "type": "integer", "minimum": 2 },
+        "routed_token_decisions": { "type": "integer", "minimum": 32 },
+        "expert_assignments": { "type": "integer", "minimum": 128 },
+        "batch_shapes": {
+          "type": "array", "minItems": 2, "maxItems": 2,
+          "items": { "$ref": "#/$defs/batchShape" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_index", "phase", "decode_step", "batch_size", "tokens_per_sequence", "token_count"],
+      "properties": {
+        "event_index": { "type": "integer", "minimum": 0 },
+        "phase": { "enum": ["prefill", "decode"] },
+        "decode_step": { "type": ["integer", "null"], "minimum": 0 },
+        "batch_size": { "type": "integer", "minimum": 1 },
+        "tokens_per_sequence": { "type": "integer", "minimum": 1 },
+        "token_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "layerEvent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_index", "token_count", "expert_indices", "routing_weights"],
+      "properties": {
+        "event_index": { "type": "integer", "minimum": 0 },
+        "token_count": { "type": "integer", "minimum": 1 },
+        "expert_indices": {
+          "type": "array", "minItems": 4,
+          "items": { "type": "integer", "minimum": 0, "maximum": 63 }
+        },
+        "routing_weights": {
+          "type": "array", "minItems": 4,
+          "items": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "expertStatistics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tokens_per_expert", "hot_experts", "long_tail_experts", "empty_experts", "minimum_tokens", "maximum_tokens", "mean_tokens", "p95_tokens"],
+      "properties": {
+        "tokens_per_expert": {
+          "type": "array", "minItems": 60, "maxItems": 64,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "hot_experts": {
+          "type": "array", "minItems": 4, "maxItems": 8, "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 0, "maximum": 63 }
+        },
+        "long_tail_experts": {
+          "type": "array", "maxItems": 8, "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 0, "maximum": 63 }
+        },
+        "empty_experts": {
+          "type": "array", "maxItems": 64, "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 0, "maximum": 63 }
+        },
+        "minimum_tokens": { "type": "integer", "minimum": 0 },
+        "maximum_tokens": { "type": "integer", "minimum": 0 },
+        "mean_tokens": { "type": "number", "minimum": 0 },
+        "p95_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "layer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["layer_index", "top_k", "token_count", "events", "expert_statistics"],
+      "properties": {
+        "layer_index": { "type": "integer", "minimum": 0, "maximum": 23 },
+        "top_k": { "enum": [4, 8] },
+        "token_count": { "type": "integer", "minimum": 2 },
+        "events": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/layerEvent" } },
+        "expert_statistics": { "$ref": "#/$defs/expertStatistics" }
+      }
+    },
+    "batchShape": {
+      "type": "object", "additionalProperties": false,
+      "required": ["phase", "batch_size", "tokens_per_sequence", "occurrences"],
+      "properties": {
+        "phase": { "enum": ["prefill", "decode"] },
+        "batch_size": { "type": "integer", "minimum": 1 },
+        "tokens_per_sequence": { "type": "integer", "minimum": 1 },
+        "occurrences": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

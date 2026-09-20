@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://uma-qmoe.local/schemas/benchmark_contract.schema.json",
-  "title": "UMA-QMoE BenchmarkContract v1",
+  "title": "UMA-QMoE BenchmarkContract v1/v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,7 +22,7 @@
     "blocking_items"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "kind": { "const": "benchmark_contract" },
     "contract_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
     "status": { "enum": ["draft", "frozen"] },
@@ -43,7 +43,7 @@
     },
     "targets": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -51,20 +51,18 @@
           "id",
           "accelerator_architecture",
           "backend",
-          "container_image",
-          "runtime_source_commit",
-          "runtime_source_ref"
+          "host_toolchain",
+          "external_baselines"
         ],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
           "accelerator_architecture": { "type": "string", "minLength": 1 },
           "backend": { "enum": ["cuda", "hip"] },
-          "container_image": {
-            "type": "string",
-            "pattern": "^.+@sha256:[0-9a-f]{64}$"
-          },
-          "runtime_source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-          "runtime_source_ref": { "type": "string", "minLength": 1 }
+          "host_toolchain": { "$ref": "#/$defs/hostToolchain" },
+          "external_baselines": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/externalBaseline" }
+          }
         }
       }
     },
@@ -76,6 +74,7 @@
         "weight_dtype": { "type": "string", "minLength": 1 },
         "compute_dtype": { "type": "string", "minLength": 1 },
         "derivation": { "$ref": "#/$defs/fileReference" },
+        "weight_source": { "$ref": "#/$defs/weightSource" },
         "decoding": {
           "type": "object",
           "additionalProperties": false,
@@ -204,12 +203,97 @@
       "uniqueItems": true
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "schema_version": { "const": 1 } } },
+      "then": {
+        "properties": {
+          "oracle": {
+            "required": ["derivation"],
+            "not": { "required": ["weight_source"] }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "schema_version": { "const": 2 } } },
+      "then": {
+        "properties": {
+          "oracle": {
+            "required": ["weight_source"],
+            "not": { "required": ["derivation"] }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
+    "hostToolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "container_image",
+        "framework",
+        "torch_version",
+        "transformers_version",
+        "backend_version"
+      ],
+      "properties": {
+        "container_image": {
+          "type": "string",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "framework": { "const": "pytorch_transformers" },
+        "torch_version": { "type": "string", "minLength": 1 },
+        "transformers_version": { "type": "string", "minLength": 1 },
+        "backend_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "externalBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "implementation",
+        "container_image",
+        "source_commit",
+        "source_ref",
+        "status"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$" },
+        "implementation": { "type": "string", "minLength": 1 },
+        "container_image": {
+          "type": "string",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["active", "optional", "blocked"] },
+        "blocking_reason": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "blocked" } } },
+          "then": { "required": ["blocking_reason"] }
+        }
+      ]
+    },
     "fileReference": {
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "sha256"],
       "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "weightSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": { "enum": ["model_derivation", "model_manifest"] },
         "path": { "type": "string", "minLength": 1 },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }

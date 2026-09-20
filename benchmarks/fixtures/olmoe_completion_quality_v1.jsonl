@@ -1,0 +1,16 @@
+{"id":"fact-001","category":"factual_completion","prompt":"The capital of France is","completion":" Paris."}
+{"id":"fact-002","category":"factual_completion","prompt":"Water freezes at","completion":" zero degrees Celsius."}
+{"id":"fact-003","category":"factual_completion","prompt":"The largest planet in our solar system is","completion":" Jupiter."}
+{"id":"fact-004","category":"factual_completion","prompt":"Plants use sunlight to make energy through","completion":" photosynthesis."}
+{"id":"math-001","category":"math_completion","prompt":"Sixty kilometers per hour for two hours covers","completion":" one hundred twenty kilometers."}
+{"id":"math-002","category":"math_completion","prompt":"The next power of two after sixteen is","completion":" thirty-two."}
+{"id":"math-003","category":"math_completion","prompt":"A triangle with three equal sides is","completion":" an equilateral triangle."}
+{"id":"math-004","category":"math_completion","prompt":"Ten divided by two equals","completion":" five."}
+{"id":"code-001","category":"code_completion","prompt":"In Python, the length of a list is returned by","completion":" the len function."}
+{"id":"code-002","category":"code_completion","prompt":"A Boolean value can be either true or","completion":" false."}
+{"id":"code-003","category":"code_completion","prompt":"A loop that visits every item in a sequence is commonly written with","completion":" a for statement."}
+{"id":"code-004","category":"code_completion","prompt":"A function sends a value back to its caller with","completion":" a return statement."}
+{"id":"reasoning-001","category":"reasoning_completion","prompt":"All robins are birds. Alex is a robin. Therefore Alex is","completion":" a bird."}
+{"id":"reasoning-002","category":"reasoning_completion","prompt":"If every square is a rectangle, then a square is","completion":" also a rectangle."}
+{"id":"reasoning-003","category":"reasoning_completion","prompt":"A wet road and falling rain together suggest that","completion":" it is raining."}
+{"id":"reasoning-004","category":"reasoning_completion","prompt":"Reducing the bytes read for each token can improve inference when the workload is","completion":" limited by memory bandwidth."}

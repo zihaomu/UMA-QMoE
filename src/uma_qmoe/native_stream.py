@@ -63,10 +63,32 @@ def _native_compile_command(
         # The Halo image ships ROCm as Python wheel packages. hipcc links
         # libamdhip64 but does not add the wheel's sibling lib directory to
         # the dynamic loader path, so an otherwise valid executable exits 127.
-        rocm_library_directory = Path(compiler).resolve().parent.parent / "lib"
-        if not (rocm_library_directory / "libamdhip64.so").exists():
+        runtime_candidates = [Path(compiler).resolve().parent.parent / "lib"]
+        hipconfig = shutil.which("hipconfig")
+        if hipconfig is not None:
+            runtime_candidates.append(Path(hipconfig).resolve().parent.parent / "lib")
+        rocm_library_directory = next(
+            (
+                candidate
+                for candidate in runtime_candidates
+                if (candidate / "libamdhip64.so").is_file()
+            ),
+            None,
+        )
+        if rocm_library_directory is None and hipconfig is not None:
+            configured_root = Path(
+                _run_checked([hipconfig, "--path"], timeout=15.0).stdout.strip()
+            )
+            configured_library_directory = configured_root / "lib"
+            if (
+                configured_root.is_absolute()
+                and (configured_library_directory / "libamdhip64.so").is_file()
+            ):
+                rocm_library_directory = configured_library_directory
+        if rocm_library_directory is None:
             raise ContractError(
-                "hipcc runtime library directory does not contain libamdhip64.so"
+                "ROCm compiler tools do not identify a runtime directory "
+                "containing libamdhip64.so"
             )
         command.append(f"-Wl,-rpath,{rocm_library_directory}")
     command.extend((str(source), "-o", str(executable)))
