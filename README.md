@@ -4,11 +4,10 @@ UMA-QMoE is a quantization-native MoE inference project for bandwidth-constraine
 unified-memory systems. The first targets are NVIDIA DGX Spark / GB10 and AMD
 Strix Halo / Radeon 8060S.
 
-The repository is in the M0 bootstrap stage. Current code establishes
-machine-readable, fail-closed model, benchmark, target, machine, memory,
-Safe UMA, acquisition, tensor-inventory, derivation, Oracle-smoke, memory-
-bandwidth, allocation-matrix, native-stream, and run contracts before kernel
-performance claims begin.
+The public control plane and the OLMoE M0-M1 foundation are established. Active
+work is closing the Spark-only M2 path and preparing Qwen M3-M5 target evidence.
+See the [project handoff and recovery status](doc/UMA_QMOE_PROJECT_HANDOFF.md) for
+the authoritative checkpoint, MVP distance, blockers, and restore order.
 
 ## Runtime boundary
 
