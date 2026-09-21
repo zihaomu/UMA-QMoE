@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/expert_balanced_sample_manifest.schema.json",
+  "title": "UMA-QMoE ExpertBalancedSampleManifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "created_at", "status", "model", "inputs", "algorithm", "algorithm_sha256", "selection", "summary", "layers", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "expert_balanced_sample_manifest" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["passed", "insufficient_coverage"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision"],
+      "properties": {
+        "model_id": { "const": "Qwen/Qwen1.5-MoE-A2.7B" },
+        "model_revision": { "const": "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9" }
+      }
+    },
+    "inputs": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dataset_manifest_sha256", "coverage_report_sha256", "route_capture_sha256"],
+      "properties": {
+        "dataset_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "coverage_report_sha256": { "$ref": "#/$defs/sha256" },
+        "route_capture_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "algorithm": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "minimum_effective_samples", "target_routed_tokens_p05", "maximum_selected_tokens", "tie_breaker", "duplicate_tokens_allowed"],
+      "properties": {
+        "id": { "const": "deficit-weighted-router-affinity-lazy-greedy-v1" },
+        "minimum_effective_samples": { "const": 256.0 },
+        "target_routed_tokens_p05": { "const": 512 },
+        "maximum_selected_tokens": { "type": "integer", "minimum": 1 },
+        "tie_breaker": { "const": "ascending token_sha256" },
+        "duplicate_tokens_allowed": { "const": false }
+      }
+    },
+    "algorithm_sha256": { "$ref": "#/$defs/sha256" },
+    "selection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["candidate_tokens", "selected_tokens", "selected_order_sha256", "tokens"],
+      "properties": {
+        "candidate_tokens": { "type": "integer", "minimum": 1 },
+        "selected_tokens": { "type": "integer", "minimum": 0 },
+        "selected_order_sha256": { "$ref": "#/$defs/sha256" },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["rank", "sample_id", "token_index", "token_id", "token_sha256", "affinity_score_at_selection", "coverage_gain"],
+            "properties": {
+              "rank": { "type": "integer", "minimum": 0 },
+              "sample_id": { "type": "string", "minLength": 1 },
+              "token_index": { "type": "integer", "minimum": 0 },
+              "token_id": { "type": "integer", "minimum": 0 },
+              "token_sha256": { "$ref": "#/$defs/sha256" },
+              "affinity_score_at_selection": { "type": "number", "minimum": 0 },
+              "coverage_gain": { "type": "integer", "minimum": 1, "maximum": 96 }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["layer_expert_units", "eligible_units", "insufficient_units"],
+      "properties": {
+        "layer_expert_units": { "const": 1440 },
+        "eligible_units": { "type": "integer", "minimum": 0, "maximum": 1440 },
+        "insufficient_units": { "type": "integer", "minimum": 0, "maximum": 1440 }
+      }
+    },
+    "layers": {
+      "type": "array", "minItems": 24, "maxItems": 24,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["layer_index", "routed_token_count_p05", "eligible_experts", "experts"],
+        "properties": {
+          "layer_index": { "type": "integer", "minimum": 0, "maximum": 23 },
+          "routed_token_count_p05": { "type": "integer", "minimum": 0 },
+          "eligible_experts": { "type": "integer", "minimum": 0, "maximum": 60 },
+          "experts": {
+            "type": "array", "minItems": 60, "maxItems": 60,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["expert_index", "routed_token_count", "effective_samples", "status"],
+              "properties": {
+                "expert_index": { "type": "integer", "minimum": 0, "maximum": 59 },
+                "routed_token_count": { "type": "integer", "minimum": 0 },
+                "effective_samples": { "type": "number", "minimum": 0 },
+                "status": { "enum": ["eligible", "insufficient_coverage"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dataset_token_floor_passed", "selection_is_unique", "all_layer_experts_explicit", "all_units_eligible", "overall_passed"],
+      "properties": {
+        "dataset_token_floor_passed": { "type": "boolean" },
+        "selection_is_unique": { "type": "boolean" },
+        "all_layer_experts_explicit": { "type": "boolean" },
+        "all_units_eligible": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

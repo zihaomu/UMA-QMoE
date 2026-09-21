@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/quantization_dataset_manifest.schema.json",
+  "title": "UMA-QMoE QuantizationDatasetManifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "created_at", "status", "partition", "model", "tokenizer", "source", "deduplication", "samples", "totals", "token_floor"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "quantization_dataset_manifest" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["draft", "frozen"] },
+    "partition": { "enum": ["calibration", "search", "held_out"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision"],
+      "properties": {
+        "model_id": { "const": "Qwen/Qwen1.5-MoE-A2.7B" },
+        "model_revision": { "const": "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9" }
+      }
+    },
+    "tokenizer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tokenizer_id", "tokenizer_revision", "artifacts_sha256", "add_special_tokens"],
+      "properties": {
+        "tokenizer_id": { "type": "string", "minLength": 1 },
+        "tokenizer_revision": { "type": "string", "minLength": 1 },
+        "artifacts_sha256": { "$ref": "#/$defs/sha256" },
+        "add_special_tokens": { "const": false }
+      }
+    },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "uri", "revision", "license", "file_sha256"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "uri": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "minLength": 1 },
+        "license": { "type": "string", "minLength": 1 },
+        "file_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "deduplication": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithm", "input_samples", "duplicates_removed"],
+      "properties": {
+        "algorithm": { "const": "sha256(prompt + NUL + completion)" },
+        "input_samples": { "type": "integer", "minimum": 1 },
+        "duplicates_removed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "samples": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sample_id", "category", "source_text_sha256", "prompt_sha256", "target_sha256", "prompt_token_ids", "target_token_ids", "prompt_token_count", "target_token_count"],
+        "properties": {
+          "sample_id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "minLength": 1 },
+          "source_text_sha256": { "$ref": "#/$defs/sha256" },
+          "prompt_sha256": { "$ref": "#/$defs/sha256" },
+          "target_sha256": { "$ref": "#/$defs/sha256" },
+          "prompt_token_ids": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 } },
+          "target_token_ids": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+          "prompt_token_count": { "type": "integer", "minimum": 1 },
+          "target_token_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "totals": {
+      "type": "object", "additionalProperties": false,
+      "required": ["samples", "prompt_tokens", "target_tokens", "categories"],
+      "properties": {
+        "samples": { "type": "integer", "minimum": 1 },
+        "prompt_tokens": { "type": "integer", "minimum": 1 },
+        "target_tokens": { "type": "integer", "minimum": 0 },
+        "categories": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "token_floor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["minimum_prompt_tokens", "minimum_target_tokens", "passed"],
+      "properties": {
+        "minimum_prompt_tokens": { "type": "integer", "minimum": 0 },
+        "minimum_target_tokens": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

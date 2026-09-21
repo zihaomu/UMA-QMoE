@@ -26,6 +26,8 @@ SCHEMA_BY_KIND = {
     "custom_operator_evidence": "custom_operator_evidence.schema.json",
     "external_baseline": "external_baseline.schema.json",
     "expert_pack_manifest": "expert_pack_manifest.schema.json",
+    "expert_balanced_sample_manifest": "expert_balanced_sample_manifest.schema.json",
+    "expert_calibration_coverage": "expert_calibration_coverage.schema.json",
     "hardware_counter_calibration": "hardware_counter_calibration.schema.json",
     "layer_precision_search": "layer_precision_search.schema.json",
     "machine_baseline": "machine_baseline.schema.json",
@@ -43,6 +45,7 @@ SCHEMA_BY_KIND = {
     "packed_q4_kernel_evidence": "packed_q4_kernel_evidence.schema.json",
     "public_baseline": "public_baseline.schema.json",
     "quantization_compensation_search": "quantization_compensation_search.schema.json",
+    "quantization_dataset_manifest": "quantization_dataset_manifest.schema.json",
     "router_logit_compensation_search": "router_logit_compensation_search.schema.json",
     "reference_host_baseline": "reference_host_baseline.schema.json",
     "reference_oracle_comparison": "reference_oracle_comparison.schema.json",
@@ -1740,6 +1743,20 @@ def validate_document(
                 raise ContractError("full_model policy forbids layer and expert")
             if document["policy"]["min_router_top_k_set_agreement"] is None:
                 raise ContractError("full_model policy requires router agreement")
+    elif kind == "quantization_dataset_manifest":
+        from .quantization_calibration import validate_quantization_dataset_manifest
+
+        validate_quantization_dataset_manifest(document, require_frozen=require_frozen)
+    elif kind == "expert_calibration_coverage":
+        from .quantization_calibration import validate_expert_calibration_coverage
+
+        validate_expert_calibration_coverage(document)
+    elif kind == "expert_balanced_sample_manifest":
+        from .quantization_calibration import (
+            validate_expert_balanced_sample_manifest,
+        )
+
+        validate_expert_balanced_sample_manifest(document)
     elif kind == "route_trace":
         from .route_trace import validate_route_trace_document
 

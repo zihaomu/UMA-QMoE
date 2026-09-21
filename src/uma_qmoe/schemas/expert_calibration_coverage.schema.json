@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uma-qmoe.local/schemas/expert_calibration_coverage.schema.json",
+  "title": "UMA-QMoE ExpertCalibrationCoverage v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "captured_at", "target_id", "status", "model", "inputs", "method", "summary", "layers", "gates"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "expert_calibration_coverage" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "target_id": { "enum": ["local-halo", "spark1"] },
+    "status": { "enum": ["passed", "insufficient_coverage"] },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_id", "model_revision", "num_layers", "num_experts", "top_k"],
+      "properties": {
+        "model_id": { "const": "Qwen/Qwen1.5-MoE-A2.7B" },
+        "model_revision": { "const": "1a758c50ecb6350748b9ce0a99d2352fd9fc11c9" },
+        "num_layers": { "const": 24 },
+        "num_experts": { "const": 60 },
+        "top_k": { "const": 4 }
+      }
+    },
+    "inputs": { "$ref": "#/$defs/inputs" },
+    "method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "natural_routes_only", "probability_quantiles", "minimum_effective_samples", "target_routed_tokens_p05"],
+      "properties": {
+        "id": { "const": "qwen-natural-route-coverage-v1" },
+        "natural_routes_only": { "const": true },
+        "probability_quantiles": { "const": "deterministic-2048-bin-histogram-v1" },
+        "activation_statistics": { "const": "fp32-raw-moments-plus-deterministic-strided-reservoir-8192-v1" },
+        "minimum_effective_samples": { "const": 256.0 },
+        "target_routed_tokens_p05": { "const": 512 }
+      }
+    },
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["prompt_tokens", "layer_expert_units", "eligible_units", "insufficient_units", "empty_units"],
+      "properties": {
+        "prompt_tokens": { "type": "integer", "minimum": 1 },
+        "layer_expert_units": { "const": 1440 },
+        "eligible_units": { "type": "integer", "minimum": 0, "maximum": 1440 },
+        "insufficient_units": { "type": "integer", "minimum": 0, "maximum": 1440 },
+        "empty_units": { "type": "integer", "minimum": 0, "maximum": 1440 }
+      }
+    },
+    "layers": {
+      "type": "array", "minItems": 24, "maxItems": 24,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["layer_index", "total_assignments", "routed_token_count_p05", "routed_token_count_p50", "routed_token_count_p95", "experts"],
+        "properties": {
+          "layer_index": { "type": "integer", "minimum": 0, "maximum": 23 },
+          "total_assignments": { "type": "integer", "minimum": 1 },
+          "routed_token_count_p05": { "type": "integer", "minimum": 0 },
+          "routed_token_count_p50": { "type": "integer", "minimum": 0 },
+          "routed_token_count_p95": { "type": "integer", "minimum": 0 },
+          "experts": { "type": "array", "minItems": 60, "maxItems": 60, "items": { "$ref": "#/$defs/expert" } }
+        }
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dataset_token_floor_passed", "all_layer_experts_explicit", "no_empty_experts", "all_units_eligible", "activation_statistics_complete", "overall_passed"],
+      "properties": {
+        "dataset_token_floor_passed": { "type": "boolean" },
+        "all_layer_experts_explicit": { "type": "boolean" },
+        "no_empty_experts": { "type": "boolean" },
+        "all_units_eligible": { "type": "boolean" },
+        "activation_statistics_complete": { "type": "boolean" },
+        "overall_passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "inputs": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dataset_manifest_sha256", "route_capture_sha256"],
+      "properties": {
+        "dataset_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "route_capture_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "distribution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mean", "p05", "p50", "p95"],
+      "properties": {
+        "mean": { "type": "number", "minimum": 0 },
+        "p05": { "type": "number", "minimum": 0 },
+        "p50": { "type": "number", "minimum": 0 },
+        "p95": { "type": "number", "minimum": 0 }
+      }
+    },
+    "activationSummary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["element_count", "mean", "second_moment", "max_abs", "kurtosis", "p05", "p50", "p95"],
+      "properties": {
+        "element_count": { "type": "integer", "minimum": 1 },
+        "mean": { "type": "number" },
+        "second_moment": { "type": "number", "minimum": 0 },
+        "max_abs": { "type": "number", "minimum": 0 },
+        "kurtosis": { "type": "number", "minimum": 0 },
+        "p05": { "type": "number" },
+        "p50": { "type": "number" },
+        "p95": { "type": "number" }
+      }
+    },
+    "activations": {
+      "type": "object", "additionalProperties": false,
+      "required": ["expert_index", "projections"],
+      "properties": {
+        "expert_index": { "type": "integer", "minimum": 0, "maximum": 59 },
+        "projections": {
+          "type": "object", "additionalProperties": false,
+          "required": ["gate_proj", "up_proj", "down_proj"],
+          "properties": {
+            "gate_proj": { "$ref": "#/$defs/activationSummary" },
+            "up_proj": { "$ref": "#/$defs/activationSummary" },
+            "down_proj": { "$ref": "#/$defs/activationSummary" }
+          }
+        }
+      }
+    },
+    "expert": {
+      "type": "object", "additionalProperties": false,
+      "required": ["expert_index", "status", "routed_token_count", "assignment_fraction", "sum_route_weight", "sum_squared_route_weight", "effective_samples", "route_probability", "route_margin", "router_entropy", "top_k_position_counts", "activations"],
+      "properties": {
+        "expert_index": { "type": "integer", "minimum": 0, "maximum": 59 },
+        "status": { "enum": ["eligible", "insufficient_coverage"] },
+        "routed_token_count": { "type": "integer", "minimum": 0 },
+        "assignment_fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sum_route_weight": { "type": "number", "minimum": 0 },
+        "sum_squared_route_weight": { "type": "number", "minimum": 0 },
+        "effective_samples": { "type": "number", "minimum": 0 },
+        "route_probability": { "$ref": "#/$defs/distribution" },
+        "route_margin": { "$ref": "#/$defs/distribution" },
+        "router_entropy": { "$ref": "#/$defs/distribution" },
+        "top_k_position_counts": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "integer", "minimum": 0 } },
+        "activations": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/activations" }] }
+      }
+    }
+  }
+}
