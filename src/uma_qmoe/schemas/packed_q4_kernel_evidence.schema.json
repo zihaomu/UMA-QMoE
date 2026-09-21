@@ -7,7 +7,7 @@
     "schema_version": { "const": 1 },
     "kind": { "const": "packed_q4_kernel_evidence" },
     "captured_at": { "type": "string", "format": "date-time" },
-    "target_id": { "enum": ["halo3", "spark1"] },
+    "target_id": { "enum": ["halo3", "local-halo", "spark1"] },
     "status": { "enum": ["passed", "failed"] },
     "model": {
       "type": "object",

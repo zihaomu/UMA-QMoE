@@ -53,7 +53,9 @@ CLIP_RATIOS = (1.0, 0.98, 0.95, 0.92, 0.9, 0.87, 0.85, 0.8, 0.75, 0.7)
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
+    parser.add_argument(
+        "--target-id", choices=("halo3", "local-halo", "spark1"), required=True
+    )
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--reverse-layer-evidence", type=Path, required=True)
     parser.add_argument(
@@ -223,11 +225,28 @@ def _activation_weighted_q4(
 
 def _source_q8_metrics(source: dict[str, Any]) -> dict[str, Any]:
     search = next(row for row in source["searches"] if row["quantized_bits"] == 8)
-    return next(
-        row["metrics"]
-        for row in search["cumulative_rows"]
-        if row["quantized_layers"] == Q8_SOURCE_ANCHOR
-    )
+    rows_by_layers = {
+        tuple(row["quantized_layers"]): row for row in search["cumulative_rows"]
+    }
+    anchor = tuple(Q8_SOURCE_ANCHOR)
+    if anchor in rows_by_layers:
+        return rows_by_layers[anchor]["metrics"]
+
+    # Layer sensitivity rankings are target-specific.  A locally reproduced
+    # reverse search may therefore not contain the historical halo3 anchor as
+    # one of its cumulative prefixes.  In that case compare against the
+    # source search's own lowest-bpw passing Q8 policy.  This comparison is a
+    # diagnostic in the v2 contract; the rebuilt fixed policy is still
+    # independently quality-gated below.
+    local_anchor = search["lowest_bpw_passing_quantized_layers"]
+    if local_anchor is None:
+        raise RuntimeError("source reverse search has no passing Q8 policy")
+    try:
+        return rows_by_layers[tuple(local_anchor)]["metrics"]
+    except KeyError as error:
+        raise RuntimeError(
+            "source reverse search Q8 policy is missing from cumulative rows"
+        ) from error
 
 
 def _target_pack_tensors(

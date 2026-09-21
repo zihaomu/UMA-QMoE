@@ -248,7 +248,9 @@ def _policy_identity(
 ) -> str:
     value = {
         "policy_id": policy_id,
-        "layer_encodings": {str(index): layer_encodings[index] for index in range(16)},
+        "layer_encodings": {
+            str(index): layer_encodings[index] for index in sorted(layer_encodings)
+        },
         "policy_evidence_sha256": policy_evidence_sha256,
     }
     return hashlib.sha256(
@@ -260,18 +262,23 @@ def _validated_policy(
     policy_id: str,
     layer_encodings: Mapping[int, str],
     policy_evidence_sha256: str,
+    *,
+    num_layers: int = 16,
 ) -> dict[str, Any]:
     if not isinstance(policy_id, str) or not policy_id:
         raise ContractError("TargetPack policy id must be non-empty")
-    if set(layer_encodings) != set(range(16)):
-        raise ContractError("TargetPack policy must assign every OLMoE layer exactly once")
+    if set(layer_encodings) != set(range(num_layers)):
+        model_name = "OLMoE" if num_layers == 16 else "Qwen"
+        raise ContractError(
+            f"TargetPack policy must assign every {model_name} layer exactly once"
+        )
     if any(value not in ENCODINGS for value in layer_encodings.values()):
         raise ContractError("TargetPack policy contains an unsupported encoding")
     if len(policy_evidence_sha256) != 64 or any(
         value not in "0123456789abcdef" for value in policy_evidence_sha256
     ):
         raise ContractError("TargetPack policy evidence identity must be SHA-256")
-    normalized = {str(index): layer_encodings[index] for index in range(16)}
+    normalized = {str(index): layer_encodings[index] for index in range(num_layers)}
     return {
         "policy_id": policy_id,
         "layer_encodings": normalized,
@@ -311,8 +318,14 @@ def write_target_pack(
     ):
         raise ContractError("TargetPack model manifest identity must be SHA-256")
     align_up(0, tensor_alignment_bytes)
+    is_qwen = model_id == "Qwen/Qwen1.5-MoE-A2.7B"
+    num_layers = 24 if is_qwen else 16
+    num_experts = 60 if is_qwen else 64
     policy = _validated_policy(
-        policy_id, layer_encodings, policy_evidence_sha256
+        policy_id,
+        layer_encodings,
+        policy_evidence_sha256,
+        num_layers=num_layers,
     )
     target = Path(destination)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -346,7 +359,7 @@ def write_target_pack(
                     raise ContractError(f"unexpected TargetPack tensor name {name!r}")
                 layer_index = int(match.group(1))
                 expert_index = int(match.group(2))
-                if layer_index >= 16 or expert_index >= 64:
+                if layer_index >= num_layers or expert_index >= num_experts:
                     raise ContractError(f"TargetPack tensor identity is out of range: {name!r}")
                 encoding = layer_encodings[layer_index]
                 if isinstance(values, TargetTensor):
@@ -574,6 +587,11 @@ class TargetPackReader:
             header.get("policy", {}).get("policy_id", ""),
             layer_encodings,
             header.get("policy", {}).get("policy_evidence_sha256", ""),
+            num_layers=(
+                24
+                if model.get("model_id") == "Qwen/Qwen1.5-MoE-A2.7B"
+                else 16
+            ),
         )
         if header.get("policy") != expected_policy:
             raise ContractError("TargetPack policy identity hash mismatch")
@@ -596,9 +614,10 @@ class TargetPackReader:
             layer_index = int(match.group(1))
             expert_index = int(match.group(2))
             encoding = item.get("encoding")
+            is_qwen = model.get("model_id") == "Qwen/Qwen1.5-MoE-A2.7B"
             if (
-                layer_index >= 16
-                or expert_index >= 64
+                layer_index >= (24 if is_qwen else 16)
+                or expert_index >= (60 if is_qwen else 64)
                 or item.get("layer_index") != layer_index
                 or item.get("expert_index") != expert_index
                 or item.get("projection") != match.group(3)
@@ -674,8 +693,15 @@ class TargetPackReader:
         return header, payload_offset, payload_length
 
     def layer_encoding(self, layer_index: int) -> str:
-        if not 0 <= layer_index < 16:
-            raise ContractError("TargetPack layer index must be in [0, 15]")
+        layer_count = (
+            24
+            if self.header["model"]["model_id"] == "Qwen/Qwen1.5-MoE-A2.7B"
+            else 16
+        )
+        if not 0 <= layer_index < layer_count:
+            raise ContractError(
+                f"TargetPack layer index must be in [0, {layer_count - 1}]"
+            )
         return self.header["policy"]["layer_encodings"][str(layer_index)]
 
     def validate_fixed_olmoe_complete(self) -> None:
@@ -708,6 +734,39 @@ class TargetPackReader:
             expected_counts[self.layer_encoding(layer)] += 64 * 3
         if self.header["encoding_tensor_counts"] != expected_counts:
             raise ContractError("TargetPack fixed OLMoE policy counts are inconsistent")
+
+    def validate_fixed_qwen_complete(self) -> None:
+        """Require the exact 24x60x3 Qwen routed-expert tensor set."""
+
+        expected = {
+            f"model.layers.{layer}.mlp.experts.{expert}.{projection}.weight": (
+                (2048, 1408) if projection == "down_proj" else (1408, 2048)
+            )
+            for layer in range(24)
+            for expert in range(60)
+            for projection in ("gate_proj", "up_proj", "down_proj")
+        }
+        observed = {
+            name: tuple(item["shape"]) for name, item in self._tensors.items()
+        }
+        if observed != expected:
+            missing = sorted(set(expected) - set(observed))
+            unexpected = sorted(set(observed) - set(expected))
+            wrong_shape = sorted(
+                name
+                for name in set(observed) & set(expected)
+                if observed[name] != expected[name]
+            )
+            raise ContractError(
+                "TargetPack fixed Qwen tensor set mismatch: "
+                f"missing={missing[:8]!r}, unexpected={unexpected[:8]!r}, "
+                f"wrong_shape={wrong_shape[:8]!r}"
+            )
+        expected_counts = {encoding: 0 for encoding in sorted(ENCODINGS)}
+        for layer in range(24):
+            expected_counts[self.layer_encoding(layer)] += 60 * 3
+        if self.header["encoding_tensor_counts"] != expected_counts:
+            raise ContractError("TargetPack fixed Qwen policy counts are inconsistent")
 
     def tensor_views(self, name: str) -> tuple[memoryview, memoryview, Mapping[str, Any]]:
         try:

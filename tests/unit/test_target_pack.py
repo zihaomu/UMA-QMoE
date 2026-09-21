@@ -187,3 +187,27 @@ def test_target_pack_rejects_preencoded_tensor_outside_layer_policy(
             layer_encodings=LAYER_ENCODINGS,
             policy_evidence_sha256="c" * 64,
         )
+
+
+def test_target_pack_accepts_qwen_24_layer_policy(tmp_path: Path) -> None:
+    path = tmp_path / "qwen.uqtp"
+    policy = {layer: "q8_group128" for layer in range(24)}
+    manifest = write_target_pack(
+        path,
+        [
+            (
+                "model.layers.23.mlp.experts.59.down_proj.weight",
+                np.ones((1, 128), dtype=np.float32),
+            )
+        ],
+        model_id="Qwen/Qwen1.5-MoE-A2.7B",
+        model_revision="a" * 40,
+        model_manifest_sha256="b" * 64,
+        policy_id="qwen-all-q8-v1",
+        layer_encodings=policy,
+        policy_evidence_sha256="c" * 64,
+    )
+
+    validate_document(manifest)
+    with TargetPackReader(path) as reader:
+        assert reader.layer_encoding(23) == "q8_group128"

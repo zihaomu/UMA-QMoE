@@ -102,7 +102,7 @@ def load_native_extension(
         os.environ[arch_name] = arch_value
         try:
             extension = load(
-                name=f"uma_qmoe_packed_q4_{platform}_v8",
+                name=f"uma_qmoe_packed_q4_{platform}_v9",
                 sources=[str(path) for path in staged_sources],
                 build_directory=str(target_build),
                 extra_cflags=["-O3", "-std=c++17"],
@@ -133,6 +133,31 @@ class _DeviceQ4Tensor:
             self.packed.numel() * self.packed.element_size()
             + self.scales.numel() * self.scales.element_size()
         )
+
+
+@dataclass(frozen=True)
+class _DeviceQ8Tensor:
+    quantized: Any
+    scales: Any
+    output_features: int
+    input_features: int
+    group_size: int
+
+    @property
+    def device_storage_bytes(self) -> int:
+        return (
+            self.quantized.numel() * self.quantized.element_size()
+            + self.scales.numel() * self.scales.element_size()
+        )
+
+
+@dataclass(frozen=True)
+class _DeviceBF16Tensor:
+    weight: Any
+
+    @property
+    def device_storage_bytes(self) -> int:
+        return self.weight.numel() * self.weight.element_size()
 
 
 @dataclass(frozen=True)
@@ -290,6 +315,61 @@ class PackedQ4NativeBackend:
                 weight.input_features,
                 weight.group_size,
             )
+
+    def qwen_forward(
+        self,
+        hidden_states: Any,
+        expert_indices: Any,
+        routing_weights: Any,
+        layer_index: int,
+        pack_handle: int,
+    ) -> Any:
+        """Execute fixed Qwen Top-4 routes through generic packed Q4 GEMVs."""
+
+        import torch
+        import torch.nn.functional as functional
+
+        if hidden_states.dtype != torch.bfloat16:
+            raise RuntimeError("Qwen packed Q4 backend requires BF16 hidden states")
+        if not 0 <= layer_index < 24:
+            raise RuntimeError("Qwen layer_index must be in [0, 23]")
+        flattened = hidden_states.reshape(-1, hidden_states.shape[-1])
+        if flattened.shape[-1] != 2048:
+            raise RuntimeError("Qwen packed Q4 backend requires hidden size 2048")
+        if expert_indices.shape != (flattened.shape[0], 4):
+            raise RuntimeError("Qwen packed Q4 backend requires [tokens, 4] routes")
+        if expert_indices.dtype not in (torch.int32, torch.int64):
+            raise RuntimeError("expert_indices must use int32 or int64")
+
+        final_hidden_states = torch.zeros_like(flattened)
+        with torch.no_grad():
+            expert_mask = functional.one_hot(expert_indices, num_classes=60)
+            expert_mask = expert_mask.permute(2, 1, 0)
+            expert_hit = torch.greater(
+                expert_mask.sum(dim=(-1, -2)), 0
+            ).nonzero()
+        for expert_entry in expert_hit:
+            expert_index = expert_entry[0]
+            slots, rows = torch.where(expert_mask[expert_index])
+            expert_number = int(expert_index.item())
+            prefix = f"model.layers.{layer_index}.mlp.experts.{expert_number}"
+            selected = flattened.index_select(0, rows).contiguous()
+            gate = self.q4_linear(
+                selected, pack_handle, f"{prefix}.gate_proj.weight"
+            )
+            up = self.q4_linear(
+                selected, pack_handle, f"{prefix}.up_proj.weight"
+            )
+            intermediate = functional.silu(gate)
+            intermediate.mul_(up)
+            expert_output = self.q4_linear(
+                intermediate, pack_handle, f"{prefix}.down_proj.weight"
+            )
+            expert_output = expert_output * routing_weights[rows, slots].unsqueeze(-1)
+            final_hidden_states.index_add_(
+                0, rows, expert_output.to(final_hidden_states.dtype)
+            )
+        return final_hidden_states.reshape(hidden_states.shape)
 
     @staticmethod
     def _host_projection(
@@ -484,7 +564,7 @@ class MixedTargetNativeBackend:
     def __init__(self, platform: str, extension: Any) -> None:
         missing = [
             name
-            for name in ("q8_moe_forward", "q8_moe_prefill")
+            for name in ("q8_linear", "q8_moe_forward", "q8_moe_prefill")
             if not hasattr(extension, name)
         ]
         if missing:
@@ -494,9 +574,183 @@ class MixedTargetNativeBackend:
         self.platform = platform
         self.extension = extension
         self._q4 = PackedQ4NativeBackend(platform, extension)
+        self._q8_tensors: dict[tuple[int, str, str], _DeviceQ8Tensor] = {}
+        self._bf16_tensors: dict[tuple[int, str, str], _DeviceBF16Tensor] = {}
         self._q8_layers: dict[tuple[int, int, str], _DeviceQ8Layer] = {}
         self._bf16_layers: dict[tuple[int, int, str], _DeviceBF16Layer] = {}
         self._lock = threading.Lock()
+
+    def _device_q8_tensor(
+        self, pack_handle: int, name: str, device: Any, reader: TargetPackReader
+    ) -> _DeviceQ8Tensor:
+        import torch
+
+        key = (pack_handle, name, str(device))
+        with self._lock:
+            cached = self._q8_tensors.get(key)
+        if cached is not None:
+            return cached
+        data_view, scale_view, metadata = reader.tensor_views(name)
+        try:
+            if metadata["encoding"] != "q8_group128":
+                raise RuntimeError(f"TargetPack tensor {name!r} is not Q8")
+            shape = tuple(metadata["shape"])
+            if len(shape) != 2:
+                raise RuntimeError(f"TargetPack Q8 tensor {name!r} is not a matrix")
+            quantized_host = torch.frombuffer(data_view, dtype=torch.int8).clone()
+            scales_host = torch.frombuffer(scale_view, dtype=torch.float32).clone()
+        finally:
+            data_view.release()
+            scale_view.release()
+        value = _DeviceQ8Tensor(
+            quantized=quantized_host.to(device=device, non_blocking=False),
+            scales=scales_host.to(device=device, non_blocking=False),
+            output_features=int(shape[0]),
+            input_features=int(shape[1]),
+            group_size=128,
+        )
+        with self._lock:
+            return self._q8_tensors.setdefault(key, value)
+
+    def q8_linear(self, input_tensor: Any, pack_handle: int, name: str) -> Any:
+        import torch
+
+        with acquire_expert_pack(pack_handle) as reader:
+            if not isinstance(reader, TargetPackReader):
+                raise RuntimeError("Q8 linear requires a TargetPack")
+            weight = self._device_q8_tensor(
+                pack_handle, name, input_tensor.device, reader
+            )
+        stream = torch.cuda.current_stream(input_tensor.device)
+        weight.quantized.record_stream(stream)
+        weight.scales.record_stream(stream)
+        return self.extension.q8_linear(
+            input_tensor.contiguous(),
+            weight.quantized,
+            weight.scales,
+            weight.output_features,
+            weight.input_features,
+            weight.group_size,
+        )
+
+    def bf16_linear(self, input_tensor: Any, pack_handle: int, name: str) -> Any:
+        import torch
+        import torch.nn.functional as functional
+
+        key = (pack_handle, name, str(input_tensor.device))
+        with self._lock:
+            weight = self._bf16_tensors.get(key)
+        if weight is None:
+            with acquire_expert_pack(pack_handle) as reader:
+                if not isinstance(reader, TargetPackReader):
+                    raise RuntimeError("BF16 linear requires a TargetPack")
+                data_view, scale_view, metadata = reader.tensor_views(name)
+                try:
+                    if metadata["encoding"] != "bf16_le" or len(scale_view):
+                        raise RuntimeError(f"TargetPack tensor {name!r} is not BF16")
+                    shape = tuple(metadata["shape"])
+                    if len(shape) != 2:
+                        raise RuntimeError(
+                            f"TargetPack BF16 tensor {name!r} is not a matrix"
+                        )
+                    host = torch.frombuffer(
+                        data_view, dtype=torch.bfloat16
+                    ).clone().reshape(shape)
+                finally:
+                    data_view.release()
+                    scale_view.release()
+            value = _DeviceBF16Tensor(
+                weight=host.to(device=input_tensor.device, non_blocking=False)
+            )
+            with self._lock:
+                weight = self._bf16_tensors.setdefault(key, value)
+        weight.weight.record_stream(torch.cuda.current_stream(input_tensor.device))
+        return functional.linear(input_tensor, weight.weight)
+
+    def qwen_forward(
+        self,
+        hidden_states: Any,
+        expert_indices: Any,
+        routing_weights: Any,
+        layer_index: int,
+        pack_handle: int,
+    ) -> Any:
+        import torch
+        import torch.nn.functional as functional
+
+        with acquire_expert_pack(pack_handle) as reader:
+            if not isinstance(reader, TargetPackReader):
+                raise RuntimeError("Qwen mixed backend requires a TargetPack")
+            encoding = reader.layer_encoding(layer_index)
+        if encoding == "q4_group128":
+            return self._q4.qwen_forward(
+                hidden_states,
+                expert_indices,
+                routing_weights,
+                layer_index,
+                pack_handle,
+            )
+        if encoding not in {"q8_group128", "bf16_le"}:
+            raise RuntimeError(
+                "Qwen performance backend received an unsupported layer; "
+                f"layer {layer_index} is {encoding}"
+            )
+        if hidden_states.dtype != torch.bfloat16:
+            raise RuntimeError("Qwen Q8 backend requires BF16 hidden states")
+        flattened = hidden_states.reshape(-1, hidden_states.shape[-1])
+        if flattened.shape[-1] != 2048:
+            raise RuntimeError("Qwen Q8 backend requires hidden size 2048")
+        if expert_indices.shape != (flattened.shape[0], 4):
+            raise RuntimeError("Qwen mixed backend requires [tokens, 4] routes")
+        if encoding == "bf16_le":
+            with acquire_expert_pack(pack_handle) as reader:
+                if not isinstance(reader, TargetPackReader):
+                    raise RuntimeError("Qwen BF16 backend requires a TargetPack")
+                layer = self._device_qwen_bf16_layer(
+                    pack_handle, layer_index, hidden_states.device, reader
+                )
+            stream = torch.cuda.current_stream(hidden_states.device)
+            for tensor in layer.tensors:
+                tensor.record_stream(stream)
+            return self._bf16_forward(
+                hidden_states,
+                expert_indices.to(dtype=torch.int64).contiguous(),
+                routing_weights.contiguous(),
+                layer,
+            ).reshape(hidden_states.shape)
+
+        linear = self.q8_linear
+        final_hidden_states = torch.zeros_like(flattened)
+        with torch.no_grad():
+            expert_mask = functional.one_hot(expert_indices, num_classes=60)
+            expert_mask = expert_mask.permute(2, 1, 0)
+            expert_hit = torch.greater(
+                expert_mask.sum(dim=(-1, -2)), 0
+            ).nonzero()
+        for expert_entry in expert_hit:
+            expert_index = expert_entry[0]
+            slots, rows = torch.where(expert_mask[expert_index])
+            expert_number = int(expert_index.item())
+            prefix = f"model.layers.{layer_index}.mlp.experts.{expert_number}"
+            selected = flattened.index_select(0, rows).contiguous()
+            gate = linear(
+                selected, pack_handle, f"{prefix}.gate_proj.weight"
+            )
+            up = linear(
+                selected, pack_handle, f"{prefix}.up_proj.weight"
+            )
+            intermediate = functional.silu(gate)
+            intermediate.mul_(up)
+            expert_output = linear(
+                intermediate, pack_handle, f"{prefix}.down_proj.weight"
+            )
+            expert_output = expert_output * routing_weights[
+                rows, slots
+            ].unsqueeze(-1)
+            final_hidden_states.index_add_(
+                0, rows, expert_output.to(final_hidden_states.dtype)
+            )
+        return final_hidden_states.reshape(hidden_states.shape)
 
     @classmethod
     def build_and_register(
@@ -659,6 +913,48 @@ class MixedTargetNativeBackend:
             existing = self._bf16_layers.setdefault(key, value)
         return existing
 
+    def _device_qwen_bf16_layer(
+        self,
+        pack_handle: int,
+        layer_index: int,
+        device: Any,
+        reader: TargetPackReader,
+    ) -> _DeviceBF16Layer:
+        """Stage one fixed Qwen BF16 layer in Transformers' stacked layout."""
+
+        import torch
+
+        key = (pack_handle, layer_index, str(device))
+        with self._lock:
+            cached = self._bf16_layers.get(key)
+        if cached is not None:
+            return cached
+        if reader.layer_encoding(layer_index) != "bf16_le":
+            raise RuntimeError(f"TargetPack layer {layer_index} is not BF16")
+        gate_up_experts = []
+        down_experts = []
+        for expert_index in range(60):
+            gate = self._host_bf16_matrix(
+                reader, layer_index, expert_index, "gate_proj", (1408, 2048)
+            )
+            up = self._host_bf16_matrix(
+                reader, layer_index, expert_index, "up_proj", (1408, 2048)
+            )
+            down = self._host_bf16_matrix(
+                reader, layer_index, expert_index, "down_proj", (2048, 1408)
+            )
+            gate_up_experts.append(torch.cat((gate, up), dim=0))
+            down_experts.append(down)
+        value = _DeviceBF16Layer(
+            gate_up=torch.stack(gate_up_experts).to(
+                device=device, non_blocking=False
+            ),
+            down=torch.stack(down_experts).to(device=device, non_blocking=False),
+        )
+        with self._lock:
+            existing = self._bf16_layers.setdefault(key, value)
+        return existing
+
     @staticmethod
     def _bf16_forward(
         hidden_states: Any,
@@ -673,13 +969,25 @@ class MixedTargetNativeBackend:
                 "mixed BF16 performance path requires torch._grouped_mm"
             )
         top_k = expert_indices.shape[1]
+        num_experts = int(layer.gate_up.shape[0])
         sample_weights = routing_weights.reshape(-1)
         expert_ids = expert_indices.reshape(-1)
-        expert_ids_grouped, permutation = torch.sort(expert_ids)
-        selected_hidden = flattened[permutation // top_k]
+        token_indices = (
+            torch.arange(flattened.shape[0], device=hidden_states.device)
+            .unsqueeze(1)
+            .expand(-1, top_k)
+            .reshape(-1)
+        )
+        permutation = torch.argsort(expert_ids)
+        inverse_permutation = torch.argsort(permutation)
+        expert_ids_grouped = expert_ids[permutation]
+        selected_hidden = flattened[token_indices][permutation]
         grouped_weights = sample_weights[permutation]
         tokens_per_expert = torch.histc(
-            expert_ids_grouped.int(), bins=64, min=0, max=63
+            expert_ids_grouped.int(),
+            bins=num_experts,
+            min=0,
+            max=num_experts - 1,
         )
         offsets = torch.cumsum(tokens_per_expert, dim=0, dtype=torch.int32)
 
@@ -687,20 +995,14 @@ class MixedTargetNativeBackend:
             selected_hidden, layer.gate_up.transpose(-2, -1), offs=offsets
         )
         gate, up = gate_up.chunk(2, dim=-1)
-        intermediate = torch.nn.functional.silu(gate)
-        intermediate.mul_(up)
+        intermediate = torch.nn.functional.silu(gate) * up
         projected = torch._grouped_mm(
             intermediate, layer.down.transpose(-2, -1), offs=offsets
         )
-        projected.mul_(grouped_weights.unsqueeze(-1))
-        inverse_permutation = torch.empty_like(permutation)
-        inverse_permutation[permutation] = torch.arange(
-            permutation.numel(), device=hidden_states.device
-        )
+        projected = projected * grouped_weights.unsqueeze(-1)
         ordered = projected[inverse_permutation]
-        return ordered.view(flattened.shape[0], top_k, 2048).sum(dim=1).reshape(
-            hidden_states.shape
-        )
+        output = ordered.view(flattened.shape[0], top_k, 2048).sum(dim=1)
+        return output.to(hidden_states.dtype).reshape(hidden_states.shape)
 
     @staticmethod
     def _sorted_routes(
@@ -720,14 +1022,22 @@ class MixedTargetNativeBackend:
     def cache_summary(self) -> dict[str, int]:
         q4 = self._q4.cache_summary()
         with self._lock:
+            q8_tensors = list(self._q8_tensors.values())
+            bf16_tensors = list(self._bf16_tensors.values())
             q8_layers = list(self._q8_layers.values())
             bf16_layers = list(self._bf16_layers.values())
         return {
             "tensor_count": (
-                q4["tensor_count"] + 192 * (len(q8_layers) + len(bf16_layers))
+                q4["tensor_count"]
+                + len(q8_tensors)
+                + len(bf16_tensors)
+                + 192 * len(q8_layers)
+                + sum(int(layer.gate_up.shape[0]) * 3 for layer in bf16_layers)
             ),
             "device_storage_bytes": (
                 q4["device_storage_bytes"]
+                + sum(tensor.device_storage_bytes for tensor in q8_tensors)
+                + sum(tensor.device_storage_bytes for tensor in bf16_tensors)
                 + sum(layer.device_storage_bytes for layer in q8_layers)
                 + sum(layer.device_storage_bytes for layer in bf16_layers)
             ),
@@ -737,7 +1047,12 @@ class MixedTargetNativeBackend:
     def release_pack(self, pack_handle: int) -> None:
         self._q4.release_pack(pack_handle)
         with self._lock:
-            for cache in (self._q8_layers, self._bf16_layers):
+            for cache in (
+                self._q8_tensors,
+                self._bf16_tensors,
+                self._q8_layers,
+                self._bf16_layers,
+            ):
                 stale = [key for key in cache if key[0] == pack_handle]
                 for key in stale:
                     del cache[key]

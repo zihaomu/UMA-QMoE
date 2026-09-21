@@ -9,7 +9,7 @@
     "schema_version": { "enum": [1, 2] },
     "kind": { "const": "compressed_host_baseline" },
     "generated_at": { "type": "string", "format": "date-time" },
-    "target_id": { "enum": ["halo3", "spark1"] },
+    "target_id": { "enum": ["halo3", "local-halo", "spark1"] },
     "status": { "enum": ["passed", "failed"] },
     "implementation": {
       "type": "object", "additionalProperties": false,

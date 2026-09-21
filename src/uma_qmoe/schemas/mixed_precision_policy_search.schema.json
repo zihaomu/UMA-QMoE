@@ -9,7 +9,7 @@
     "schema_version": { "const": 1 },
     "kind": { "const": "mixed_precision_policy_search" },
     "captured_at": { "type": "string", "format": "date-time" },
-    "target_id": { "enum": ["halo3", "spark1"] },
+    "target_id": { "enum": ["halo3", "local-halo", "spark1"] },
     "status": { "enum": ["passed", "failed"] },
     "model": {
       "type": "object", "additionalProperties": false,

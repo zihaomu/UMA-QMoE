@@ -63,6 +63,46 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
             stream.write("\n")
 
 
+def _single_expert_forward(
+    experts: Any, expert_index: int, expert_input: Any, functional: Any
+) -> Any:
+    """Run one expert across both supported Transformers weight layouts."""
+
+    gate_up = getattr(experts, "gate_up_proj", None)
+    down = getattr(experts, "down_proj", None)
+    if gate_up is not None and down is not None:
+        gate, up = functional.linear(
+            expert_input, gate_up[expert_index]
+        ).chunk(2, dim=-1)
+        return functional.linear(experts.act_fn(gate) * up, down[expert_index])
+    return experts[expert_index](expert_input)
+
+
+def _router_observation(
+    module: Any,
+    inputs: Any,
+    result: Any,
+    functional: Any,
+    top_k: int,
+    normalize_top_k: bool,
+) -> tuple[Any, Any, Any]:
+    """Return pre-softmax logits and the exact Top-K selection across APIs."""
+
+    if isinstance(result, tuple) and len(result) == 3:
+        _router_probabilities, routing_weights, selected_experts = result
+        if not inputs or getattr(module, "weight", None) is None:
+            raise RuntimeError("Qwen router hook cannot reconstruct pre-softmax logits")
+        router_logits = functional.linear(inputs[0], module.weight)
+        return router_logits, routing_weights, selected_experts
+    if getattr(result, "ndim", None) != 2:
+        raise RuntimeError("Qwen router hook returned an unexpected value")
+    routing = functional.softmax(result.float(), dim=-1)
+    routing_weights, selected_experts = routing.topk(top_k, dim=-1)
+    if normalize_top_k:
+        routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
+    return result, routing_weights, selected_experts
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-id", required=True)
@@ -152,9 +192,11 @@ def main() -> int:
         expert_fixture.numpy().tobytes()
     ).hexdigest()
     expert_input = expert_fixture.to(device="cuda:0", dtype=torch.bfloat16)
-    selected_expert = model.model.layers[LAYER_INDEX].mlp.experts[EXPERT_INDEX]
+    experts = model.model.layers[LAYER_INDEX].mlp.experts
     with torch.inference_mode():
-        expert_output = selected_expert(expert_input)
+        expert_output = _single_expert_forward(
+            experts, EXPERT_INDEX, expert_input, functional
+        )
     if not isinstance(expert_output, torch.Tensor):
         raise RuntimeError("Qwen expert returned an unexpected value")
 
@@ -165,17 +207,16 @@ def main() -> int:
     normalize_top_k = bool(getattr(config, "norm_topk_prob", False))
 
     def gate_hook(layer_index: int):
-        def hook(_module: Any, _inputs: Any, result: Any) -> None:
-            if not isinstance(result, torch.Tensor) or result.ndim != 2:
-                raise RuntimeError("Qwen router hook returned unexpected logits")
-            routing = functional.softmax(result, dim=-1, dtype=torch.float32)
-            weights, experts = torch.topk(
-                routing, QWEN1_5_MOE.top_k, dim=-1
+        def hook(module: Any, inputs: Any, result: Any) -> None:
+            logits, _weights, experts = _router_observation(
+                module,
+                inputs,
+                result,
+                functional,
+                QWEN1_5_MOE.top_k,
+                normalize_top_k,
             )
-            if normalize_top_k:
-                weights = weights / weights.sum(dim=-1, keepdim=True)
-            del weights
-            router_logits[layer_index] = result.detach().cpu()
+            router_logits[layer_index] = logits.detach().cpu()
             router_topk[layer_index] = experts.detach().cpu()
 
         return hook

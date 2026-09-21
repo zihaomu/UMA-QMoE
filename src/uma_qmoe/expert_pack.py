@@ -27,6 +27,10 @@ _OLMOE_EXPERT = re.compile(
     r"^model\.layers\.(\d+)\.mlp\.experts\.(\d+)\."
     r"(down_proj|gate_proj|up_proj)\.weight$"
 )
+_QWEN_EXPERT = re.compile(
+    r"^model\.layers\.(\d+)\.mlp\.experts\.(\d+)\."
+    r"(down_proj|gate_proj|up_proj)\.weight$"
+)
 _RESERVED_NIBBLE_TABLE = bytes(
     1 if (value & 0x0F) == 8 or (value >> 4) == 8 else 0 for value in range(256)
 )
@@ -66,6 +70,42 @@ def _validate_olmoe_expert_tensor(name: str, tensor: Any) -> None:
     if str(tensor.dtype) != "torch.bfloat16":
         raise ContractError(
             f"OLMoE expert tensor {name!r} must be BF16, observed {tensor.dtype}"
+        )
+
+
+def _ordered_qwen_experts(weight_map: Mapping[str, str]) -> list[tuple[str, str]]:
+    projection_order = ("gate_proj", "up_proj", "down_proj")
+    expected = [
+        f"model.layers.{layer}.mlp.experts.{expert}.{projection}.weight"
+        for layer in range(24)
+        for expert in range(60)
+        for projection in projection_order
+    ]
+    observed = {name for name in weight_map if ".mlp.experts." in name}
+    if observed != set(expected):
+        missing = sorted(set(expected) - observed)
+        unexpected = sorted(observed - set(expected))
+        raise ContractError(
+            "Qwen expert tensor set mismatch: "
+            f"missing={missing[:8]!r}, unexpected={unexpected[:8]!r}"
+        )
+    return [(name, weight_map[name]) for name in expected]
+
+
+def _validate_qwen_expert_tensor(name: str, tensor: Any) -> None:
+    match = _QWEN_EXPERT.fullmatch(name)
+    if match is None:
+        raise ContractError(f"unexpected Qwen expert tensor name {name!r}")
+    projection = match.group(3)
+    expected_shape = (2048, 1408) if projection == "down_proj" else (1408, 2048)
+    if tuple(tensor.shape) != expected_shape:
+        raise ContractError(
+            f"Qwen expert tensor {name!r} shape mismatch: "
+            f"expected {expected_shape}, observed {tuple(tensor.shape)}"
+        )
+    if str(tensor.dtype) != "torch.bfloat16":
+        raise ContractError(
+            f"Qwen expert tensor {name!r} must be BF16, observed {tensor.dtype}"
         )
 
 

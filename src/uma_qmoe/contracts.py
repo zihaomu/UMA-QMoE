@@ -336,6 +336,7 @@ def validate_document(
         gates = document["gates"]
         expected_platform = {
             "halo3": "hip_gfx1151",
+            "local-halo": "hip_gfx1151",
             "spark1": "cuda_sm121",
         }[document["target_id"]]
         expected = {
@@ -402,6 +403,7 @@ def validate_document(
         gates = document["gates"]
         expected_platform = {
             "halo3": "hip_gfx1151",
+            "local-halo": "hip_gfx1151",
             "spark1": "cuda_sm121",
         }[document["target_id"]]
         acceptance = correctness["acceptance"]

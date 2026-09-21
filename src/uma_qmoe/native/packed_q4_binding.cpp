@@ -67,6 +67,14 @@ torch::Tensor uma_qmoe_q4_linear_cuda(
     std::int64_t input_features,
     std::int64_t group_size);
 
+torch::Tensor uma_qmoe_q8_linear_cuda(
+    const torch::Tensor& input,
+    const torch::Tensor& quantized,
+    const torch::Tensor& scales,
+    std::int64_t output_features,
+    std::int64_t input_features,
+    std::int64_t group_size);
+
 torch::Tensor uma_qmoe_q4_moe_forward_cuda(
     const torch::Tensor& hidden,
     const torch::Tensor& expert_indices,
@@ -152,6 +160,38 @@ torch::Tensor q4_linear(
       "packed Q4 scale count does not match the weight shape");
   return uma_qmoe_q4_linear_cuda(
       input, packed, scales, output_features, input_features, group_size);
+}
+
+torch::Tensor q8_linear(
+    const torch::Tensor& input,
+    const torch::Tensor& quantized,
+    const torch::Tensor& scales,
+    std::int64_t output_features,
+    std::int64_t input_features,
+    std::int64_t group_size) {
+  TORCH_CHECK(input.is_cuda(), "Q8 input must be on a CUDA/HIP device");
+  check_device_tensor(quantized, input, "Q8 bytes", torch::kInt8);
+  check_device_tensor(scales, input, "Q8 scales", torch::kFloat32);
+  TORCH_CHECK(
+      input.scalar_type() == torch::kBFloat16,
+      "Q8 linear accepts BF16 activations only");
+  TORCH_CHECK(input.dim() == 2, "Q8 input must have shape [rows, K]");
+  TORCH_CHECK(input.is_contiguous(), "Q8 input must be contiguous");
+  TORCH_CHECK(
+      output_features > 0 && input_features > 0 && group_size > 0,
+      "Q8 dimensions and group size must be positive");
+  TORCH_CHECK(
+      input.size(1) == input_features,
+      "Q8 input K does not match the weight shape");
+  const auto element_count = output_features * input_features;
+  TORCH_CHECK(
+      quantized.dim() == 1 && quantized.numel() == element_count,
+      "Q8 byte count does not match the weight shape");
+  TORCH_CHECK(
+      scales.dim() == 1 && scales.numel() == element_count / group_size,
+      "Q8 scale count does not match the weight shape");
+  return uma_qmoe_q8_linear_cuda(
+      input, quantized, scales, output_features, input_features, group_size);
 }
 
 torch::Tensor q4_moe_forward(
@@ -452,6 +492,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
       "q4_linear",
       &q4_linear,
       "UMA-QMoE canonical packed-Q4 W4A16 linear (CUDA/HIP)");
+  module.def(
+      "q8_linear",
+      &q8_linear,
+      "UMA-QMoE canonical direct-Q8 W8A16 linear (CUDA/HIP)");
   module.def(
       "q4_moe_forward",
       &q4_moe_forward,

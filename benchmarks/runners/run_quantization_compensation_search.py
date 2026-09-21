@@ -54,7 +54,9 @@ CANDIDATES = [
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
+    parser.add_argument(
+        "--target-id", choices=("halo3", "local-halo", "spark1"), required=True
+    )
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--expert-pack", type=Path, required=True)
     parser.add_argument("--model-manifest-sha256", required=True)

@@ -65,7 +65,11 @@ def build_compressed_host_baseline(
     ):
         if not isinstance(runtime.get(name), str) or not runtime[name]:
             raise ContractError(f"compressed runner runtime {name} is missing")
-    expected_platform = {"halo3": "hip_gfx1151", "spark1": "cuda_sm121"}[target_id]
+    expected_platform = {
+        "halo3": "hip_gfx1151",
+        "local-halo": "hip_gfx1151",
+        "spark1": "cuda_sm121",
+    }[target_id]
     if runtime["platform"] != expected_platform:
         raise ContractError("compressed runner native platform does not match target")
     runner_model = metadata.get("model")

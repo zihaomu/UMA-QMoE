@@ -42,7 +42,9 @@ COVERAGE_THRESHOLDS = [0.5, 0.75, 0.9, 0.95, 0.99, 1.0]
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
+    parser.add_argument(
+        "--target-id", choices=("halo3", "local-halo", "spark1"), required=True
+    )
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--expert-pack", type=Path, required=True)
     parser.add_argument("--model-manifest-sha256", required=True)

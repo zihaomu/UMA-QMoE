@@ -9,7 +9,7 @@
     "schema_version": { "enum": [1, 2] },
     "kind": { "const": "activation_aware_mixed_policy" },
     "captured_at": { "type": "string", "format": "date-time" },
-    "target_id": { "enum": ["halo3", "spark1"] },
+    "target_id": { "enum": ["halo3", "local-halo", "spark1"] },
     "status": { "enum": ["passed", "failed"] },
     "model": {
       "type": "object", "additionalProperties": false,
@@ -25,7 +25,7 @@
       "properties": {
         "id": { "enum": ["layer15-awq-q4-q8-bf16-mixed-v1", "layer15-awq-q4-q8-bf16-mixed-v2"] },
         "source_reverse_layer_evidence": { "$ref": "#/$defs/identity" },
-        "source_evidence_target_id": { "enum": ["halo3", "spark1"] },
+        "source_evidence_target_id": { "enum": ["halo3", "local-halo", "spark1"] },
         "cross_target_reproduction": { "type": "boolean" },
         "prompt_fixture": { "$ref": "#/$defs/identity" },
         "calibration_only": { "const": false },

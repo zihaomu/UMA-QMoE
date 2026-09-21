@@ -12,7 +12,12 @@ from uma_qmoe.compressed_host_baseline import (
 from uma_qmoe.contracts import ContractError, validate_document
 
 
-def _write_run(directory: Path, *, target_policy_id: str | None = None) -> None:
+def _write_run(
+    directory: Path,
+    *,
+    target_id: str = "halo3",
+    target_policy_id: str | None = None,
+) -> None:
     directory.mkdir()
     result = {
         "duration_seconds": 2.0,
@@ -47,7 +52,7 @@ def _write_run(directory: Path, *, target_policy_id: str | None = None) -> None:
         "expert_pack_vma_count": 1,
     }
     metadata = {
-        "target_id": "halo3",
+        "target_id": target_id,
         "status": "succeeded",
         "returncode": 0,
         "started_at": "2026-09-19T01:00:00Z",
@@ -108,10 +113,15 @@ def _write_run(directory: Path, *, target_policy_id: str | None = None) -> None:
     )
 
 
-def _build(directory: Path, *, target_policy_id: str | None = None) -> dict:
+def _build(
+    directory: Path,
+    *,
+    target_id: str = "halo3",
+    target_policy_id: str | None = None,
+) -> dict:
     return build_compressed_host_baseline(
         directory,
-        target_id="halo3",
+        target_id=target_id,
         source_commit="a" * 40,
         backend="hip",
         container_image="example/host@sha256:" + "b" * 64,
@@ -136,6 +146,17 @@ def test_compressed_host_baseline_binds_native_performance_mode(
     assert document["implementation"]["platform"] == "hip_gfx1151"
     assert document["gates"]["cache_stable_after_warmup"] is True
     assert document["gates"]["no_dequantized_weight_cache"] is True
+    validate_document(document)
+
+
+def test_compressed_host_baseline_accepts_distinct_local_halo_target(
+    tmp_path: Path,
+) -> None:
+    run = tmp_path / "run"
+    _write_run(run, target_id="local-halo")
+    document = _build(run, target_id="local-halo")
+    assert document["target_id"] == "local-halo"
+    assert document["implementation"]["platform"] == "hip_gfx1151"
     validate_document(document)
 
 

@@ -4,16 +4,18 @@ UMA-QMoE is a quantization-native MoE inference project for bandwidth-constraine
 unified-memory systems. The first targets are NVIDIA DGX Spark / GB10 and AMD
 Strix Halo / Radeon 8060S.
 
-The public control plane and the OLMoE M0-M1 foundation are established. Active
-work is closing the Spark-only M2 path and preparing Qwen M3-M5 target evidence.
-See the [project handoff and recovery status](doc/UMA_QMOE_PROJECT_HANDOFF.md) for
-the authoritative checkpoint, MVP distance, blockers, and restore order.
+The public control plane and the OLMoE M0-M1 foundation are established. A
+single-user, batch-1 Qwen1.5-MoE-A2.7B MVP now runs locally on AMD Strix Halo
+(`gfx1151`); the separately governed Spark release remains unfinished. See the
+[project handoff and recovery status](doc/UMA_QMOE_PROJECT_HANDOFF.md) for the
+scope boundary, evidence, blockers, and restore order.
 
 ## Runtime boundary
 
 UMA-QMoE does not embed vLLM. The core path is a fixed PyTorch/Hugging Face
-model host that loads dense BF16 tensors, maps one Q4 ExpertPack, and invokes
-the project-owned `uma_qmoe::moe_forward` operator. vLLM remains an isolated
+model host that loads dense BF16 tensors, maps one ExpertPack/TargetPack, and
+invokes the project-owned `uma_qmoe::moe_forward` or
+`uma_qmoe::qwen_moe_forward` operator. vLLM remains an isolated
 external comparison under `benchmarks/external/vllm/`; CI rejects imports in
 either direction between that external runner and the core runtime.
 
@@ -25,6 +27,44 @@ performance mode. Performance mode still fails closed when the backend is not
 explicitly installed, so benchmark runs cannot silently fall back to the
 correctness implementation. The first native backend is a correctness-first
 microkernel baseline; its single-layer timing is not an end-to-end TPS claim.
+
+## Local Strix Halo Qwen MVP
+
+The validated local candidate keeps routed-expert layers 0-15 in BF16 and
+layers 16-23 in symmetric Q8 group-128. Dense and shared-expert tensors stay
+BF16. It loads no routed-expert checkpoint parameter, maps the 20.89 GB
+TargetPack once, and executes through the explicit `hip_gfx1151` backend.
+
+Run one greedy prompt with the already-built local assets:
+
+```bash
+scripts/run_local_halo_qwen.sh "The capital of France is" 32
+```
+
+The model is the Base checkpoint, not an instruction/chat model. Override the
+default `/home/amd/work/models` root with `UMA_QMOE_MODEL_ROOT` when needed.
+The command is network-disabled and uses the digest-pinned ROCm container.
+
+The local MVP report passes all of its scoped gates:
+
+| Gate | Observed |
+|---|---:|
+| 16-sample relative perplexity change vs BF16 | `+0.0882%` |
+| Completion token-score drop | `0.0` points |
+| Top-4 route exact-set agreement | `99.3125%` |
+| 128+32 greedy throughput, batch 1 | `8.66 tok/s` |
+| Gain over the native all-Q4 negative control | `+5.23%` |
+| p50 TTFT / p50 TPOT | `729.0 ms / 94.6 ms` |
+| Matched completion peak-memory reduction vs BF16 | `18.64%` |
+| Timed candidate swap / major faults | `0 B / 0` |
+
+The all-Q4 configuration is retained as a negative control: it is smaller but
+fails quality (`71.67%` route agreement and `0.0459` logit KL). The mixed
+candidate passes the `>=99%` route, `<=1%` PPL increase, `<=0.5` score-drop,
+single-mapping, and no-global-dequant-cache gates. Local evidence is under
+`artifacts/local-halo/` (gitignored), with the combined decision in
+`qwen-mvp-report.json`. This is a local Strix Halo MVP result; it does not
+replace or weaken the draft Spark contract.
 
 ## Bootstrap development
 

@@ -39,7 +39,9 @@ BASE_BITS = [8, 9, 12]
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
+    parser.add_argument(
+        "--target-id", choices=("halo3", "local-halo", "spark1"), required=True
+    )
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--compensation-evidence", type=Path, required=True)
     parser.add_argument("--prompt-fixture", type=Path, required=True)

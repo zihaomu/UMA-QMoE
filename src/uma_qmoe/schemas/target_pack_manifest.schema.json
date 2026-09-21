@@ -78,6 +78,8 @@
         "layer_encodings": {
           "type": "object",
           "additionalProperties": false,
+          "minProperties": 16,
+          "maxProperties": 24,
           "required": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
           "properties": {
             "0": { "$ref": "#/$defs/encoding_name" },
@@ -95,7 +97,15 @@
             "12": { "$ref": "#/$defs/encoding_name" },
             "13": { "$ref": "#/$defs/encoding_name" },
             "14": { "$ref": "#/$defs/encoding_name" },
-            "15": { "$ref": "#/$defs/encoding_name" }
+            "15": { "$ref": "#/$defs/encoding_name" },
+            "16": { "$ref": "#/$defs/encoding_name" },
+            "17": { "$ref": "#/$defs/encoding_name" },
+            "18": { "$ref": "#/$defs/encoding_name" },
+            "19": { "$ref": "#/$defs/encoding_name" },
+            "20": { "$ref": "#/$defs/encoding_name" },
+            "21": { "$ref": "#/$defs/encoding_name" },
+            "22": { "$ref": "#/$defs/encoding_name" },
+            "23": { "$ref": "#/$defs/encoding_name" }
           }
         }
       }
@@ -150,7 +160,7 @@
       "required": ["name", "layer_index", "expert_index", "projection", "encoding", "shape", "element_count", "group_size", "group_count", "data_offset", "data_bytes", "scale_offset", "scale_bytes", "storage_end_offset", "effective_bits_per_weight", "tensor_payload_sha256"],
       "properties": {
         "name": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
-        "layer_index": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "layer_index": { "type": "integer", "minimum": 0, "maximum": 23 },
         "expert_index": { "type": "integer", "minimum": 0, "maximum": 63 },
         "projection": { "enum": ["gate_proj", "up_proj", "down_proj"] },
         "encoding": { "$ref": "#/$defs/encoding_name" },

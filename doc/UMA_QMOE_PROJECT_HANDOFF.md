@@ -15,6 +15,46 @@
 > **恢复原则：** 含有本文档的 Git 提交定义公开代码检查点；模型、私有配置和原始实验
 > 证据必须按本文第 8 节单独恢复，不能假设它们存在于 GitHub。
 
+## 2026-09-21 本机 Strix Halo Qwen MVP 增量
+
+本节是对下方 2026-09-20 Spark 检查点的增量，不改变 Spark-only 发布 Contract，也不复用
+历史 `halo3`/`halo4` 身份。本机使用新的 `local-halo` target，在 AMD Radeon 8060S
+`gfx1151`、31 GiB UMA 上完成了一个明确限域的 Qwen1.5-MoE-A2.7B Base 模型 MVP：
+
+- 固定 Qwen revision、14 个源文件和 28.64 GB 内容已逐文件 SHA-256 验证；BF16 Oracle
+  三条 stream 重复采集字节一致，24 层 Top-4、128+32 RouteTrace 已冻结。
+- 压缩 Host 在 Meta 上建模，在 checkpoint Tensor 物化前跳过全部 4320 个 routed-expert
+  Tensor；仅加载 339 个 dense/shared Tensor（3,717,402,624 bytes），TargetPack 只 mmap
+  一次。
+- 候选 Policy 是 layer 0-15 BF16、layer 16-23 Q8 group-128；TargetPack 大小
+  20,893,577,216 bytes，SHA-256 为
+  `4dea1f1b5f8538efa76bc30c53195ff1abda4bd3bd60439e302e68433b522eeb`。
+- `uma_qmoe::qwen_moe_forward` 已接入 Qwen router/shared expert；BF16 前缀严格复刻
+  Transformers 5 的 grouped-MM 排序与归约顺序，Q8 尾层直接读取压缩字节，禁止静默
+  fallback，且没有持久全局反量化专家缓存。
+- 16 条固定 completion（56 个目标 token）相对 BF16 的 PPL 变化为 `+0.0882%`，token
+  score 无下降，全样本/全层 Top-4 exact-set agreement 为 `99.3125%`；单提示 logit KL
+  为 `0.001080`。
+- 128 prompt + 32 output、batch 1、3 warmup + 10 measured 的正式样本为
+  `8.6638 tok/s`，p50 TTFT `729.0 ms`，p50 TPOT `94.6 ms`，请求时长 CV `0.60%`；
+  测量窗口内 swap 为 0、major fault 为 0，峰值 Torch reserved 为 23.26 GB。
+- 同源码快照的 all-Q4 性能对照为 `8.2330 tok/s`，mixed 快 `5.23%`；但 all-Q4 本身
+  不满足质量门（Top-4 `71.67%`、KL `0.0459`），只保留为负对照。
+- 在相同 16 条 completion 工作负载上，mixed 峰值 reserved 24.99 GB，BF16 reference
+  30.72 GB，下降 `18.64%`。统一报告 `artifacts/local-halo/qwen-mvp-report.json` 的
+  scoped gates 全部通过。
+
+直接推理入口：
+
+```bash
+scripts/run_local_halo_qwen.sh "The capital of France is" 32
+```
+
+这是单用户、batch-1、Base 模型推理 MVP，不声称 instruction/chat/tool-use 能力，也不构成
+Spark M3-M5 发布完成。原始证据位于 gitignored 的 `artifacts/local-halo/`，大 Pack 位于
+`/home/amd/work/models/UMA-QMoE/local-halo/`。正式性能比较所绑定的工作树源码快照 SHA-256
+为 `1b44d3100d94a1da286d41901d44ce4a96bcfcdc5d9f1e8badcc712d2aec3874`。
+
 ## 1. 执行摘要
 
 UMA-QMoE 面向统一内存设备上的 MoE 推理，目标是在固定质量约束下，通过专家级量化、

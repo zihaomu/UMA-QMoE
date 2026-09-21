@@ -43,6 +43,29 @@ def _exact_token_ids(tokenizer: Any, prompt: str, length: int) -> list[int]:
     return (seed * ((length + len(seed) - 1) // len(seed)))[:length]
 
 
+def _router_topk(
+    result: Any,
+    functional: Any,
+    torch: Any,
+    top_k: int,
+    normalize_top_k: bool,
+) -> tuple[Any, Any]:
+    """Read exact router outputs from current or legacy Transformers APIs."""
+
+    if isinstance(result, tuple) and len(result) == 3:
+        _router_probabilities, routing_weights, selected_experts = result
+        return routing_weights, selected_experts
+    if not isinstance(result, torch.Tensor) or result.ndim != 2:
+        raise RuntimeError("Qwen gate returned an unexpected router value")
+    routing = functional.softmax(result, dim=-1, dtype=torch.float32)
+    routing_weights, selected_experts = torch.topk(routing, top_k, dim=-1)
+    if normalize_top_k:
+        routing_weights = routing_weights / routing_weights.sum(
+            dim=-1, keepdim=True
+        )
+    return routing_weights, selected_experts
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-id", required=True)
@@ -129,14 +152,13 @@ def main() -> int:
 
     def make_hook(layer_index: int):
         def hook(_module: Any, _inputs: Any, result: Any) -> None:
-            if not isinstance(result, torch.Tensor) or result.ndim != 2:
-                raise RuntimeError("Qwen gate returned unexpected router logits")
-            routing = functional.softmax(result, dim=-1, dtype=torch.float32)
-            weights, experts = torch.topk(
-                routing, QWEN1_5_MOE.top_k, dim=-1
+            weights, experts = _router_topk(
+                result,
+                functional,
+                torch,
+                QWEN1_5_MOE.top_k,
+                normalize_top_k,
             )
-            if normalize_top_k:
-                weights = weights / weights.sum(dim=-1, keepdim=True)
             flat_weights = weights.detach().cpu().reshape(-1).tolist()
             flat_experts = experts.detach().cpu().reshape(-1).tolist()
             token_count = int(experts.shape[0])

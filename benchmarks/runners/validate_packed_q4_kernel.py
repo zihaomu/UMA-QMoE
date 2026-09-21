@@ -32,7 +32,9 @@ MODEL_REVISION = "9b0c1aa87e34a20052389dce1f0cf01da783f654"
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
+    parser.add_argument(
+        "--target-id", choices=("halo3", "local-halo", "spark1"), required=True
+    )
     parser.add_argument(
         "--expected-platform", choices=("hip_gfx1151", "cuda_sm121"), required=True
     )
@@ -243,6 +245,7 @@ def main() -> int:
         )
         expected_platform = {
             "halo3": "hip_gfx1151",
+            "local-halo": "hip_gfx1151",
             "spark1": "cuda_sm121",
         }[args.target_id]
         gates = {

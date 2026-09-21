@@ -95,6 +95,12 @@ def _packed_evidence() -> dict:
     }
 
 
+def test_packed_kernel_evidence_accepts_distinct_local_halo_target() -> None:
+    document = _packed_evidence()
+    document["target_id"] = "local-halo"
+    validate_document(document)
+
+
 def _metrics(exact: float, cosine: float) -> dict:
     return {
         "finite": True,
@@ -219,6 +225,7 @@ def test_mixed_backend_requires_direct_q8_entrypoints() -> None:
                 q4_linear=lambda *_args: None,
                 q4_moe_forward=lambda *_args: None,
                 q4_moe_prefill=lambda *_args: None,
+                q8_linear=lambda *_args: None,
             ),
         )
 
@@ -230,17 +237,24 @@ def test_mixed_backend_releases_every_encoding_cache() -> None:
             q4_linear=lambda *_args: None,
             q4_moe_forward=lambda *_args: None,
             q4_moe_prefill=lambda *_args: None,
+            q8_linear=lambda *_args: None,
             q8_moe_forward=lambda *_args: None,
             q8_moe_prefill=lambda *_args: None,
         ),
     )
     backend._q4._layer_cache[(1, 15, "cuda:0")] = object()
+    backend._q8_tensors[(1, "first", "cuda:0")] = object()
+    backend._q8_tensors[(2, "second", "cuda:0")] = object()
+    backend._bf16_tensors[(1, "first", "cuda:0")] = object()
+    backend._bf16_tensors[(2, "second", "cuda:0")] = object()
     backend._q8_layers[(1, 11, "cuda:0")] = object()
     backend._q8_layers[(2, 11, "cuda:0")] = object()
     backend._bf16_layers[(1, 0, "cuda:0")] = object()
     backend._bf16_layers[(2, 0, "cuda:0")] = object()
     backend.release_pack(1)
     assert backend._q4._layer_cache == {}
+    assert set(backend._q8_tensors) == {(2, "second", "cuda:0")}
+    assert set(backend._bf16_tensors) == {(2, "second", "cuda:0")}
     assert set(backend._q8_layers) == {(2, 11, "cuda:0")}
     assert set(backend._bf16_layers) == {(2, 0, "cuda:0")}
 

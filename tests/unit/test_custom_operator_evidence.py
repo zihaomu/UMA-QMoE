@@ -70,6 +70,12 @@ def test_custom_operator_evidence_recomputes_gates() -> None:
         validate_document(tampered)
 
 
+def test_custom_operator_evidence_accepts_distinct_local_halo_target() -> None:
+    document = _evidence()
+    document["target_id"] = "local-halo"
+    validate_document(document)
+
+
 def test_custom_operator_evidence_rejects_false_performance_claim() -> None:
     tampered = copy.deepcopy(_evidence())
     tampered["performance_mode"]["rejected"] = False

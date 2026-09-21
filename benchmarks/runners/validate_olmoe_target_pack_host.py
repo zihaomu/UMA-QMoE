@@ -35,7 +35,9 @@ BF16_LAYERS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target-id", choices=("halo3", "spark1"), required=True)
+    parser.add_argument(
+        "--target-id", choices=("halo3", "local-halo", "spark1"), required=True
+    )
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--target-pack", type=Path, required=True)
     parser.add_argument("--target-pack-manifest", type=Path, required=True)
