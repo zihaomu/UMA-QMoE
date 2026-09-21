@@ -12,6 +12,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+from uma_qmoe.experiments.evaluate import (
+    aggregate_quality as _aggregate,
+    capture_moe_causal_lm_quality,
+    load_completion_samples,
+    route_agreement,
+)
 from uma_qmoe.fixed_models import QWEN1_5_MOE
 from uma_qmoe.qwen_compressed_loader import load_fixed_qwen
 
@@ -31,29 +37,10 @@ def _sha256(path: Path) -> str:
 
 
 def _samples(path: Path) -> list[dict[str, str]]:
-    values = []
-    seen = set()
-    for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        if not line.strip():
-            continue
-        value = json.loads(line)
-        if set(value) != {"id", "category", "prompt", "completion"}:
-            raise RuntimeError(
-                f"invalid completion fixture fields at line {line_number}"
-            )
-        if not all(isinstance(item, str) and item for item in value.values()):
-            raise RuntimeError(
-                f"invalid completion fixture value at line {line_number}"
-            )
-        if value["id"] in seen:
-            raise RuntimeError(f"duplicate completion id {value['id']!r}")
-        seen.add(value["id"])
-        values.append(value)
-    if len(values) < 2:
-        raise RuntimeError("completion fixture must contain at least two samples")
-    return values
+    try:
+        return load_completion_samples(path)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -74,115 +61,26 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _capture(model: Any, samples: list[dict[str, str]], tokenizer: Any, torch: Any):
-    current_routes: dict[int, Any] = {}
-
-    def gate_hook(layer_index: int):
-        def hook(_module: Any, _inputs: Any, result: Any) -> None:
-            if not isinstance(result, tuple) or len(result) != 3:
-                raise RuntimeError("Qwen gate returned an unexpected value")
-            current_routes[layer_index] = result[2].detach().cpu()
-
-        return hook
-
-    handles = [
-        layer.mlp.gate.register_forward_hook(gate_hook(layer_index))
-        for layer_index, layer in enumerate(model.model.layers)
-    ]
-    records = []
-    peak_allocated = 0
-    peak_reserved = 0
-    try:
-        for sample in samples:
-            prompt_ids = tokenizer(
-                sample["prompt"], add_special_tokens=False
-            ).input_ids
-            completion_ids = tokenizer(
-                sample["completion"], add_special_tokens=False
-            ).input_ids
-            if not prompt_ids or not completion_ids:
-                raise RuntimeError(f"sample {sample['id']!r} tokenized empty")
-            token_ids = prompt_ids + completion_ids
-            input_ids = torch.tensor(
-                [token_ids], dtype=torch.long, device="cuda:0"
-            )
-            current_routes.clear()
-            with torch.inference_mode():
-                result = model(input_ids=input_ids, use_cache=False)
-                logits = result.logits.float()
-                selected = logits[:, len(prompt_ids) - 1 : -1, :]
-                targets = input_ids[:, len(prompt_ids) :]
-                losses = torch.nn.functional.cross_entropy(
-                    selected.reshape(-1, selected.shape[-1]),
-                    targets.reshape(-1),
-                    reduction="none",
-                )
-                predictions = selected.argmax(dim=-1)
-            torch.cuda.synchronize()
-            if set(current_routes) != set(range(QWEN1_5_MOE.num_layers)):
-                raise RuntimeError("completion capture missed a Qwen router")
-            records.append(
-                {
-                    "id": sample["id"],
-                    "category": sample["category"],
-                    "prompt_token_count": len(prompt_ids),
-                    "target_token_ids": completion_ids,
-                    "per_token_nll": losses.detach().cpu().tolist(),
-                    "completion_top1_token_ids": predictions[0].detach().cpu().tolist(),
-                    "routes": {
-                        str(layer): current_routes[layer].tolist()
-                        for layer in range(QWEN1_5_MOE.num_layers)
-                    },
-                    "finite": bool(torch.isfinite(logits).all().item()),
-                }
-            )
-            peak_allocated = max(peak_allocated, int(torch.cuda.max_memory_allocated()))
-            peak_reserved = max(peak_reserved, int(torch.cuda.max_memory_reserved()))
-    finally:
-        for handle in handles:
-            handle.remove()
-    return records, peak_allocated, peak_reserved
-
-
-def _aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
-    nll_values = [value for record in records for value in record["per_token_nll"]]
-    targets = [value for record in records for value in record["target_token_ids"]]
-    predictions = [
-        value for record in records for value in record["completion_top1_token_ids"]
-    ]
-    nll = sum(nll_values) / len(nll_values)
-    return {
-        "finite": all(record["finite"] for record in records),
-        "sample_count": len(records),
-        "target_token_count": len(targets),
-        "nll": nll,
-        "perplexity": math.exp(nll),
-        "completion_token_accuracy": (
-            sum(left == right for left, right in zip(predictions, targets, strict=True))
-            / len(targets)
-        ),
-    }
+    return capture_moe_causal_lm_quality(
+        model,
+        samples,
+        tokenizer,
+        num_layers=QWEN1_5_MOE.num_layers,
+        device="cuda:0",
+        torch_module=torch,
+    )
 
 
 def _route_agreement(
     candidate: list[dict[str, Any]], reference: list[dict[str, Any]]
 ) -> tuple[float, list[float]]:
-    if [item["id"] for item in candidate] != [item["id"] for item in reference]:
-        raise RuntimeError("candidate and reference completion IDs differ")
-    exact = [0] * QWEN1_5_MOE.num_layers
-    totals = [0] * QWEN1_5_MOE.num_layers
-    for candidate_sample, reference_sample in zip(candidate, reference, strict=True):
-        for layer in range(QWEN1_5_MOE.num_layers):
-            candidate_rows = candidate_sample["routes"][str(layer)]
-            reference_rows = reference_sample["routes"][str(layer)]
-            if len(candidate_rows) != len(reference_rows):
-                raise RuntimeError("candidate and reference route lengths differ")
-            for candidate_row, reference_row in zip(
-                candidate_rows, reference_rows, strict=True
-            ):
-                exact[layer] += set(candidate_row) == set(reference_row)
-                totals[layer] += 1
-    per_layer = [matches / count for matches, count in zip(exact, totals, strict=True)]
-    return sum(exact) / sum(totals), per_layer
+    try:
+        exact, per_layer, _overlap = route_agreement(
+            candidate, reference, num_layers=QWEN1_5_MOE.num_layers
+        )
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return exact, per_layer
 
 
 def main() -> int:
